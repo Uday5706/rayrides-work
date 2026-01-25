@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
@@ -24,17 +23,26 @@ class LiveRideTrackingScreen extends StatefulWidget {
   State<LiveRideTrackingScreen> createState() => _LiveRideTrackingScreenState();
 }
 
-class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
+class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
+    with SingleTickerProviderStateMixin {
   final Completer<GoogleMapController> _mapCompleter = Completer();
 
   Set<Polyline> _trackPolylines = {};
   BitmapDescriptor? _customCarIcon;
 
-  // Socket State
   final RiderSocketService _socketService = RiderSocketService();
-  LatLng? _liveSocketPos;
-  double _liveSocketHeading = 0.0;
   LatLng? _lastPathUpdatePos;
+
+  // --- SMOOTH ANIMATION VARIABLES ---
+  late AnimationController _animController;
+  LatLng _currentVisualPos = const LatLng(0, 0);
+  double _currentVisualHeading = 0.0;
+
+  LatLng _oldPos = const LatLng(0, 0);
+  LatLng _newPos = const LatLng(0, 0);
+  double _oldHeading = 0.0;
+  double _newHeading = 0.0;
+  // ----------------------------------
 
   final String _googleMapsKey = dotenv.env['GOOGLE_MAPS_API_KEY'] ?? "";
   late final PolylinePoints _polylineHelper =
@@ -43,6 +51,40 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
   @override
   void initState() {
     super.initState();
+
+    // 1. CORRECT INITIALIZATION
+    // Check if Firestore already has driver location.
+    // If yes, use it. If no, fallback to pickup.
+    double startLat =
+        widget.rideData['driver_lat'] ?? widget.rideData['pickup_lat'];
+    double startLng =
+        widget.rideData['driver_lng'] ?? widget.rideData['pickup_lng'];
+    double startHeading = (widget.rideData['driver_heading'] ?? 0.0).toDouble();
+
+    _currentVisualPos = LatLng(startLat, startLng);
+    _currentVisualHeading = startHeading;
+
+    // 2. INITIAL PATH
+    // Draw the grey line (Driver -> Pickup) IMMEDIATELY
+    _updateLiveApproachPath(_currentVisualPos);
+
+    // Setup Animation Controller (Duration = typical socket update interval)
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..addListener(() {
+        final t = _animController.value;
+        if (mounted) {
+          setState(() {
+            _currentVisualPos = LatLng(
+              ui.lerpDouble(_oldPos.latitude, _newPos.latitude, t)!,
+              ui.lerpDouble(_oldPos.longitude, _newPos.longitude, t)!,
+            );
+            _currentVisualHeading = ui.lerpDouble(_oldHeading, _newHeading, t)!;
+          });
+        }
+      });
+
     _initAssets();
     _connectSocket();
   }
@@ -50,37 +92,44 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
   @override
   void dispose() {
     _socketService.disconnect();
+    _animController.dispose();
     super.dispose();
   }
 
   void _connectSocket() {
+    print("🔵 Connecting to Rider Socket...");
+
     _socketService.connect(
       widget.rideId,
       onLocation: ({required position, required heading}) {
-        // Run inside setState to update the UI
-        if (mounted) {
-          setState(() {
-            _liveSocketPos = position;
-            _liveSocketHeading = heading;
-          });
+        if (!mounted) return;
 
-          // Move camera to follow car
-          _moveCameraToPosition(position);
+        // Trigger smooth animation to new point
+        _animateCar(position, heading);
 
-          // Update path (throttled)
-          _throttledPathUpdate(position);
-        }
+        // Update path (logic remains same)
+        _throttledPathUpdate(position);
       },
     );
   }
 
-  // --- Map Helpers ---
-  Future<void> _moveCameraToPosition(LatLng pos) async {
-    if (_mapCompleter.isCompleted) {
-      final controller = await _mapCompleter.future;
-      controller.animateCamera(CameraUpdate.newCameraPosition(
-          CameraPosition(target: pos, zoom: 16, tilt: 40)));
+  void _animateCar(LatLng destPos, double destHeading) {
+    _oldPos = _currentVisualPos;
+    _oldHeading = _currentVisualHeading;
+
+    _newPos = destPos;
+    _newHeading = destHeading;
+
+    // Fix Rotation Wrapping
+    if ((_newHeading - _oldHeading).abs() > 180) {
+      if (_newHeading > _oldHeading) {
+        _oldHeading += 360;
+      } else {
+        _newHeading += 360;
+      }
     }
+
+    _animController.forward(from: 0.0);
   }
 
   void _throttledPathUpdate(LatLng currentPos) {
@@ -89,13 +138,14 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
       _updateLiveApproachPath(currentPos);
       return;
     }
+
     double distance = Geolocator.distanceBetween(
       _lastPathUpdatePos!.latitude,
       _lastPathUpdatePos!.longitude,
       currentPos.latitude,
       currentPos.longitude,
     );
-    // Only fetch new route if driver moved > 50 meters
+
     if (distance > 50) {
       _lastPathUpdatePos = currentPos;
       _updateLiveApproachPath(currentPos);
@@ -121,14 +171,12 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
         _trackPolylines.add(Polyline(
             polylineId: const PolylineId("approach_live"),
             points: approachPoints,
-            color:
-                Colors.grey, // Grey path indicates "Driver approaching pickup"
+            color: Colors.grey.withOpacity(0.7),
             width: 5));
       });
     }
   }
 
-  // --- Assets ---
   Future<void> _initAssets() async {
     await _renderCarIcon();
     await _fetchInitialTripRoute();
@@ -168,6 +216,7 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
         mode: TravelMode.driving,
       ),
     );
+
     if (result.points.isNotEmpty && mounted) {
       List<LatLng> tripPoints =
           result.points.map((p) => LatLng(p.latitude, p.longitude)).toList();
@@ -175,18 +224,18 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
         _trackPolylines.add(Polyline(
             polylineId: const PolylineId("trip_main"),
             points: tripPoints,
-            color: Colors.blueAccent, // Blue path is the ride itself
+            color: Colors.blueAccent,
             width: 6));
       });
     }
   }
 
-  Set<Marker> _buildMapMarkers(LatLng driver, double heading) {
+  Set<Marker> _buildMapMarkers() {
     return {
       Marker(
           markerId: const MarkerId("driver_marker"),
-          position: driver,
-          rotation: heading,
+          position: _currentVisualPos,
+          rotation: _currentVisualHeading,
           icon: _customCarIcon ?? BitmapDescriptor.defaultMarker,
           anchor: const Offset(0.5, 0.5),
           flat: true),
@@ -210,49 +259,18 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          StreamBuilder<DocumentSnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('rides')
-                .doc(widget.rideId)
-                .snapshots(),
-            builder: (context, snapshot) {
-              // 1. Initial / Fallback Data (Firestore)
-              double driverLat = widget.rideData['pickup_lat'];
-              double driverLng = widget.rideData['pickup_lng'];
-              double driverHeading = 0.0;
-
-              if (snapshot.hasData && snapshot.data!.exists) {
-                final remoteData =
-                    snapshot.data!.data() as Map<String, dynamic>;
-                if (remoteData['driver_lat'] != null) {
-                  driverLat = (remoteData['driver_lat'] as num).toDouble();
-                  driverLng = (remoteData['driver_lng'] as num).toDouble();
-                  driverHeading =
-                      (remoteData['driver_heading'] as num).toDouble();
-                }
-              }
-
-              // 2. Determine Effective Location
-              // PRIORITY: Live Socket > Firestore > Static
-              final LatLng effectivePos =
-                  _liveSocketPos ?? LatLng(driverLat, driverLng);
-              final double effectiveHeading =
-                  _liveSocketPos != null ? _liveSocketHeading : driverHeading;
-
-              return GoogleMap(
-                initialCameraPosition:
-                    CameraPosition(target: effectivePos, zoom: 15),
-                markers: _buildMapMarkers(effectivePos, effectiveHeading),
-                polylines: _trackPolylines,
-                onMapCreated: (ctrl) {
-                  if (!_mapCompleter.isCompleted) _mapCompleter.complete(ctrl);
-                },
-                myLocationEnabled: false,
-                zoomControlsEnabled: false,
-                // Disable rotate gestures to keep heading visualization clear
-                rotateGesturesEnabled: false,
-              );
+          GoogleMap(
+            // 3. Initial Camera respects Driver Location
+            initialCameraPosition:
+                CameraPosition(target: _currentVisualPos, zoom: 15),
+            markers: _buildMapMarkers(),
+            polylines: _trackPolylines,
+            onMapCreated: (ctrl) {
+              if (!_mapCompleter.isCompleted) _mapCompleter.complete(ctrl);
             },
+            myLocationEnabled: false,
+            zoomControlsEnabled: false,
+            rotateGesturesEnabled: false,
           ),
           Positioned(top: 60, right: 20, child: _buildOtpDisplay()),
           SlidingUpPanel(
@@ -267,7 +285,6 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
     );
   }
 
-  // --- UI Components ---
   Widget _buildOtpDisplay() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -286,7 +303,6 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
   }
 
   Widget _buildInformationPanel() {
-    // ... [Same as your previous code] ...
     return Padding(
       padding: const EdgeInsets.all(20),
       child: Column(children: [
