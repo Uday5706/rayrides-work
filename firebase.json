@@ -1,10 +1,1 @@
-{
-  "hosting": {
-    "public": "build/web",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ]
-  }
-}
+{"hosting":{"public":"build/web","ignore":["firebase.json","**/.*","**/node_modules/**"]},"flutter":{"platforms":{"android":{"default":{"projectId":"rayrides-app","appId":"1:369533890888:android:43e87fad409f314af1037d","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"rayrides-app","configurations":{"android":"1:369533890888:android:43e87fad409f314af1037d","ios":"1:369533890888:ios:e3053698b43541dcf1037d","macos":"1:369533890888:ios:e3053698b43541dcf1037d","web":"1:369533890888:web:a93f3afbf28fe1d0f1037d","windows":"1:369533890888:web:ff865276928de976f1037d"}}}}}}

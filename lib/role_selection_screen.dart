@@ -1,7 +1,8 @@
-import 'package:flutter/material.dart';
-import 'package:rayride/fare_booking_screen.dart';
-import 'package:rayride/nav_bar.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/material.dart';
+import 'package:rayride/nav_bar.dart';
+
+import 'ride_booking_screen.dart';
 
 class roleSelection extends StatelessWidget {
   final Color primaryBlue = const Color(0xFF0288D1);
@@ -11,9 +12,9 @@ class roleSelection extends StatelessWidget {
   const roleSelection({super.key});
 
   Future<bool> checkConnection() async {
-  var result = await Connectivity().checkConnectivity();
-  return result != ConnectivityResult.none;
-}
+    var result = await Connectivity().checkConnectivity();
+    return result != ConnectivityResult.none;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -43,12 +44,21 @@ class roleSelection extends StatelessWidget {
                   ),
                   const SizedBox(height: 40),
 
-                  
                   ElevatedButton.icon(
                     onPressed: () {
-                     Navigator.push(context, MaterialPageRoute(builder: (context) => RideBookingScreen()));
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => RideBookingScreen(),
+                          // builder: (context) =>
+                          //     LiveRideTrackingScreen(rideId: "TEST_RIDE_001"),
+                        ),
+                      );
                     },
-                    icon: const Icon(Icons.directions_walk, color: Color(0xFF0288D1)),
+                    icon: const Icon(
+                      Icons.directions_walk,
+                      color: Color(0xFF0288D1),
+                    ),
                     label: const Text(
                       'I am a Commuter',
                       style: TextStyle(fontSize: 18, color: Color(0xFF0288D1)),
@@ -56,10 +66,16 @@ class roleSelection extends StatelessWidget {
                     style: ElevatedButton.styleFrom(
                       elevation: 4,
                       backgroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 14,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
-                        side: const BorderSide(color: Color(0xFF0288D1), width: 2),
+                        side: const BorderSide(
+                          color: Color(0xFF0288D1),
+                          width: 2,
+                        ),
                       ),
                     ),
                   ),
@@ -82,7 +98,10 @@ class roleSelection extends StatelessWidget {
                     style: ElevatedButton.styleFrom(
                       elevation: 4,
                       backgroundColor: primaryBlue,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 14,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                       ),
@@ -109,10 +128,7 @@ class DriverApp extends StatelessWidget {
         backgroundColor: const Color(0xFF0288D1),
       ),
       body: const Center(
-        child: Text(
-          "Welcome to RayRide!",
-          style: TextStyle(fontSize: 20),
-        ),
+        child: Text("Welcome to RayRide!", style: TextStyle(fontSize: 20)),
       ),
       bottomNavigationBar: mainnavbar(),
     );

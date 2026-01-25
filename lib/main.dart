@@ -1,16 +1,27 @@
 import 'dart:convert';
-import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:http/http.dart' as http;
-import 'package:rayride/login_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:http/http.dart' as http;
+
+import 'firebase_options.dart';
+import 'login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
+  await dotenv.load(fileName: ".env");
   // Initialize Firebase and Hive
-  await Firebase.initializeApp();
+  try {
+    await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform);
+    debugPrint("Firebase Initialized Successfully");
+  } catch (e) {
+    debugPrint("Firebase Init Failed: $e");
+  }
+
   await Hive.initFlutter();
   await Hive.openBox('offline_bookings');
 
@@ -28,6 +39,7 @@ void main() async {
     MaterialApp(
       debugShowCheckedModeBanner: false,
       home: loginscreen(),
+      // home: LiveRideTrackingScreen(rideId: "TEST_RIDE_001"),
     ),
   );
 }
@@ -52,10 +64,7 @@ Future<void> syncOfflineBookings() async {
   final response = await http.post(
     Uri.parse('http://10.0.2.2:3000/sync/bookings'), // Change if not emulator
     headers: {'Content-Type': 'application/json'},
-    body: jsonEncode({
-      'userId': userId,
-      'bookings': bookingsList,
-    }),
+    body: jsonEncode({'userId': userId, 'bookings': bookingsList}),
   );
 
   if (response.statusCode == 200) {

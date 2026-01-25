@@ -1,294 +1,477 @@
 import 'dart:async';
-import 'dart:math';
+import 'dart:math' as math; // Import math for bearing calculation
+import 'dart:ui' as ui;
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_polyline_points/flutter_polyline_points.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
 
 class LiveRideTrackingScreen extends StatefulWidget {
-  const LiveRideTrackingScreen({super.key});
+  final String rideId;
+  final Map<String, dynamic> rideData;
+
+  const LiveRideTrackingScreen({
+    super.key,
+    required this.rideId,
+    required this.rideData,
+  });
 
   @override
-  _LiveRideTrackingScreenState createState() => _LiveRideTrackingScreenState();
+  State<LiveRideTrackingScreen> createState() => _LiveRideTrackingScreenState();
 }
 
-class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> with SingleTickerProviderStateMixin {
-  final PanelController _panelController = PanelController();
-  late AnimationController _carController;
+class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
+  final Completer<GoogleMapController> _mapCompleter = Completer();
 
-  final LatLng pickupLocation = LatLng(28.7050, 77.1000);
-  final LatLng dropLocation = LatLng(28.7060, 77.1080);
-  LatLng driverLocation = LatLng(28.7041, 77.1025);
-  List<LatLng> routePoints = [];
+  Set<Polyline> _trackPolylines = {};
+  BitmapDescriptor? _customCarIcon;
+  LatLng? _previousPos;
 
-  final int _currentRouteIndex = 0;
-  double _carBearing = 0;
-  final double _carSize = 40;
+  // --- SIMULATION VARIABLES ---
+  Timer? _demoTimer;
+  LatLng? _simulatedPos; // If not null, map uses this instead of Firestore
+  double? _simulatedHeading; // If not null, map uses this
 
-  Timer? _etaTimer;
-  int _etaSeconds = 240;
-  double _distance = 2.8;
+  final String _googleMapsKey = dotenv.env['GOOGLE_MAPS_API_KEY'] ?? "";
+  late final PolylinePoints _polylineHelper =
+      PolylinePoints(apiKey: _googleMapsKey);
 
   @override
   void initState() {
     super.initState();
-
-    routePoints = _createCurvedRoute(
-      start: driverLocation,
-      waypoints: [
-        LatLng(28.7043, 77.1010),
-        LatLng(28.7046, 77.1005),
-        pickupLocation,
-        LatLng(28.7053, 77.1015),
-        LatLng(28.7057, 77.1040),
-      ],
-      end: dropLocation,
-    );
-
-    _carController = AnimationController(vsync: this, duration: Duration(seconds: 25))
-      ..addListener(_updateCarPosition)
-      ..forward();
-
-    _startEtaTimer();
-  }
-
-  List<LatLng> _createCurvedRoute({
-    required LatLng start,
-    required List<LatLng> waypoints,
-    required LatLng end,
-  }) {
-    final points = [start, ...waypoints, end];
-    final curved = <LatLng>[];
-    for (int i = 0; i < points.length - 1; i++) {
-      final p1 = points[i];
-      final p2 = points[i + 1];
-      curved.add(p1);
-      curved.add(LatLng(
-        (p1.latitude + p2.latitude) / 2 + 0.0001,
-        (p1.longitude + p2.longitude) / 2 + 0.0001,
-      ));
-    }
-    curved.add(end);
-    return curved;
-  }
-
-  void _startEtaTimer() {
-    _etaTimer = Timer.periodic(Duration(seconds: 1), (timer) {
-      if (_etaSeconds > 0) {
-        setState(() => _etaSeconds--);
-      } else {
-        timer.cancel();
-      }
-    });
-  }
-
-  void _updateCarPosition() {
-    final progress = _carController.value;
-    final double routeLength = routePoints.length.toDouble();
-    final double position = progress * (routeLength - 1);
-    final int index = position.floor();
-    final double ratio = position - index;
-
-    if (index < routePoints.length - 1) {
-      final start = routePoints[index];
-      final end = routePoints[index + 1];
-      setState(() {
-        driverLocation = LatLng(
-          start.latitude + ratio * (end.latitude - start.latitude),
-          start.longitude + ratio * (end.longitude - start.longitude),
-        );
-        _carBearing = _calculateBearing(start, end);
-        _distance = Distance().as(LengthUnit.Kilometer, driverLocation, dropLocation);
-      });
-    }
-  }
-
-  double _calculateBearing(LatLng start, LatLng end) {
-    final dLon = (end.longitude - start.longitude) * pi / 180;
-    final lat1 = start.latitude * pi / 180;
-    final lat2 = end.latitude * pi / 180;
-    final y = sin(dLon) * cos(lat2);
-    final x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon);
-    return (atan2(y, x) + pi);
-  }
-
-  String _formatEta() {
-    final min = _etaSeconds ~/ 60;
-    final sec = _etaSeconds % 60;
-    return "$min min ${sec.toString().padLeft(2, '0')}s";
-  }
-
-  void showMissedPickupDialog() {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: Colors.black87,
-        title: Text("Missed Pickup", style: TextStyle(color: Colors.white)),
-        content: Text("Driver missed your pickup. Suggest nearby spot?", style: TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text("Dismiss", style: TextStyle(color: Colors.orange)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text("Suggesting new pickup..."), backgroundColor: Colors.green),
-              );
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-            child: Text("Suggest New", style: TextStyle(color: Colors.black)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBottomSheet() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.black87,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      padding: EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(child: Container(width: 50, height: 4, color: Colors.grey[600])),
-          SizedBox(height: 16),
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 28,
-                backgroundColor: Colors.blueGrey,
-                child: Icon(Icons.person, color: Colors.white),
-              ),
-              SizedBox(width: 16),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text("Raj (Swift Dzire)", style: TextStyle(color: Colors.white, fontSize: 18)),
-                  Row(children: [
-                    Icon(Icons.star, size: 16, color: Colors.amber),
-                    Text(" 4.9  • 128 rides", style: TextStyle(color: Colors.amber))
-                  ])
-                ]),
-              ),
-              IconButton(
-                icon: Icon(Icons.call, color: Colors.green),
-                onPressed: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Calling Driver"))),
-              ),
-            ],
-          ),
-          SizedBox(height: 16),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text("ETA", style: TextStyle(color: Colors.grey)),
-              Text(_formatEta(), style: TextStyle(color: Colors.white, fontSize: 20)),
-            ]),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text("Distance", style: TextStyle(color: Colors.grey)),
-              Text("${_distance.toStringAsFixed(1)} km", style: TextStyle(color: Colors.white, fontSize: 20)),
-            ]),
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(color: Colors.green.withOpacity(0.3), borderRadius: BorderRadius.circular(12)),
-              child: Text("On time", style: TextStyle(color: Colors.greenAccent)),
-            )
-          ]),
-          SizedBox(height: 16),
-          Row(children: [
-            Icon(Icons.location_on, color: Colors.green),
-            SizedBox(width: 8),
-            Text("Pickup: Hostel Block A", style: TextStyle(color: Colors.white)),
-          ]),
-          Row(children: [
-            Icon(Icons.flag_outlined, color: Colors.redAccent),
-            SizedBox(width: 8),
-            Text("Drop: DTU Gate 1", style: TextStyle(color: Colors.white)),
-          ]),
-          SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerRight,
-            child: ElevatedButton.icon(
-              onPressed: showMissedPickupDialog,
-              icon: Icon(Icons.route, color: Colors.white),
-              label: Text("Reroute", style: TextStyle(color: Colors.white)),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-            ),
-          )
-        ],
-      ),
-    );
+    _initAssets();
   }
 
   @override
   void dispose() {
-    _carController.dispose();
-    _etaTimer?.cancel();
+    _demoTimer?.cancel(); // Cleanup timer
     super.dispose();
+  }
+
+  Future<void> _initAssets() async {
+    await _renderCarIcon();
+    await _fetchInitialTripRoute();
+  }
+
+  // ... [Keep _renderCarIcon and _fetchInitialTripRoute same as before] ...
+  Future<void> _renderCarIcon() async {
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(recorder);
+    const double iconSize = 110.0;
+
+    TextPainter painter = TextPainter(textDirection: TextDirection.ltr);
+    painter.text = TextSpan(
+      text: String.fromCharCode(Icons.directions_car_filled.codePoint),
+      style: TextStyle(
+          fontSize: iconSize,
+          fontFamily: Icons.directions_car_filled.fontFamily,
+          color: Colors.blueAccent),
+    );
+    painter.layout();
+    painter.paint(canvas, const Offset(0, 0));
+
+    final img = await recorder
+        .endRecording()
+        .toImage(iconSize.toInt(), iconSize.toInt());
+    final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+
+    if (mounted && byteData != null) {
+      setState(() => _customCarIcon =
+          BitmapDescriptor.fromBytes(byteData.buffer.asUint8List()));
+    }
+  }
+
+  Future<void> _fetchInitialTripRoute() async {
+    PolylineResult result = await _polylineHelper.getRouteBetweenCoordinates(
+      request: PolylineRequest(
+        origin: PointLatLng(
+            widget.rideData['pickup_lat'], widget.rideData['pickup_lng']),
+        destination: PointLatLng(
+            widget.rideData['drop_lat'], widget.rideData['drop_lng']),
+        mode: TravelMode.driving,
+      ),
+    );
+
+    if (result.points.isNotEmpty) {
+      List<LatLng> tripPoints =
+          result.points.map((p) => LatLng(p.latitude, p.longitude)).toList();
+
+      // CRITICAL FIX: Add 'if (mounted)' before every setState in async functions
+      if (mounted) {
+        setState(() {
+          _trackPolylines.add(Polyline(
+              polylineId: const PolylineId("trip_main"),
+              points: tripPoints,
+              color: Colors.blueAccent,
+              width: 6));
+        });
+      }
+    }
+  }
+  // ... ---------------------------------------------------------------- ...
+
+  // --- 🚗 DUMMY SIMULATION LOGIC START ---
+
+  // Helper: Calculate bearing (rotation) between two points
+  double _calculateBearing(LatLng start, LatLng end) {
+    double lat1 = start.latitude * (math.pi / 180.0);
+    double lon1 = start.longitude * (math.pi / 180.0);
+    double lat2 = end.latitude * (math.pi / 180.0);
+    double lon2 = end.longitude * (math.pi / 180.0);
+
+    double dLon = lon2 - lon1;
+    double y = math.sin(dLon) * math.cos(lat2);
+    double x = math.cos(lat1) * math.sin(lat2) -
+        math.sin(lat1) * math.cos(lat2) * math.cos(dLon);
+    double brng = math.atan2(y, x);
+    return (brng * (180.0 / math.pi) + 360.0) % 360.0;
+  }
+
+  void _startDummyDrive(LatLng currentDriverPos) async {
+    if (_demoTimer != null && _demoTimer!.isActive) return;
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text("🚗 Simulation Started!")));
+
+    // 1. Fetch Leg 1: Driver -> Pickup
+    PolylineResult leg1 = await _polylineHelper.getRouteBetweenCoordinates(
+      request: PolylineRequest(
+        origin:
+            PointLatLng(currentDriverPos.latitude, currentDriverPos.longitude),
+        destination: PointLatLng(
+            widget.rideData['pickup_lat'], widget.rideData['pickup_lng']),
+        mode: TravelMode.driving,
+      ),
+    );
+
+    // 2. Fetch Leg 2: Pickup -> Drop
+    PolylineResult leg2 = await _polylineHelper.getRouteBetweenCoordinates(
+      request: PolylineRequest(
+        origin: PointLatLng(
+            widget.rideData['pickup_lat'], widget.rideData['pickup_lng']),
+        destination: PointLatLng(
+            widget.rideData['drop_lat'], widget.rideData['drop_lng']),
+        mode: TravelMode.driving,
+      ),
+    );
+
+    if (leg1.points.isEmpty && leg2.points.isEmpty) return;
+
+    List<LatLng> driverToPickup =
+        leg1.points.map((p) => LatLng(p.latitude, p.longitude)).toList();
+    List<LatLng> pickupToDrop =
+        leg2.points.map((p) => LatLng(p.latitude, p.longitude)).toList();
+
+    int index = 0;
+    bool reachedPickup = false;
+
+    setState(() => _trackPolylines.clear());
+
+    _demoTimer = Timer.periodic(const Duration(milliseconds: 1000), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      List<LatLng> currentActivePath =
+          reachedPickup ? pickupToDrop : driverToPickup;
+
+      if (index >= currentActivePath.length - 1) {
+        if (!reachedPickup) {
+          reachedPickup = true;
+          index = 0;
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("📍 Driver reached Pickup!")));
+        } else {
+          timer.cancel();
+          setState(() {
+            _simulatedPos = null;
+            _simulatedHeading = null;
+            _trackPolylines.clear();
+          });
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text("🏁 Ride Completed")));
+          return;
+        }
+      }
+
+      LatLng start = currentActivePath[index];
+      LatLng end = currentActivePath[index + 1];
+
+      setState(() {
+        _simulatedPos = start;
+        _simulatedHeading = _calculateBearing(start, end);
+
+        // --- DYNAMIC PATH SHORTENING ---
+        // We only draw from the current 'index' to the end of the list
+        // This makes the path "disappear" behind the car
+        _trackPolylines = {
+          Polyline(
+            polylineId: PolylineId(
+                reachedPickup ? "trip_to_drop" : "approach_to_pickup"),
+            points: currentActivePath.sublist(index), // This is the secret
+            color: Colors.blueAccent,
+            width: 6,
+            jointType: JointType.round,
+          )
+        };
+      });
+
+      _moveCameraToPosition(start);
+      index++;
+    });
+  }
+  // --- 🚗 DUMMY SIMULATION LOGIC END ---
+
+  Future<void> _updateLiveApproachPath(LatLng driverLocation) async {
+    PolylineResult result = await _polylineHelper.getRouteBetweenCoordinates(
+      request: PolylineRequest(
+        origin: PointLatLng(driverLocation.latitude, driverLocation.longitude),
+        destination: PointLatLng(
+            widget.rideData['pickup_lat'], widget.rideData['pickup_lng']),
+        mode: TravelMode.driving,
+      ),
+    );
+    if (result.points.isNotEmpty && mounted) {
+      List<LatLng> approachPoints =
+          result.points.map((p) => LatLng(p.latitude, p.longitude)).toList();
+      setState(() {
+        _trackPolylines
+            .removeWhere((p) => p.polylineId.value == "approach_live");
+        _trackPolylines.add(Polyline(
+            polylineId: const PolylineId("approach_live"),
+            points: approachPoints,
+            color: Colors.grey.withOpacity(0.7),
+            width: 5));
+      });
+    }
+  }
+
+  Future<void> _moveCameraToPosition(LatLng pos) async {
+    final controller = await _mapCompleter.future;
+    controller.animateCamera(CameraUpdate.newCameraPosition(
+        CameraPosition(target: pos, zoom: 16, tilt: 40)));
+  }
+
+  Set<Marker> _buildMapMarkers(LatLng driver, double heading) {
+    return {
+      Marker(
+          markerId: const MarkerId("driver_marker"),
+          position: driver,
+          rotation: heading,
+          icon: _customCarIcon ?? BitmapDescriptor.defaultMarker,
+          anchor: const Offset(0.5, 0.5),
+          flat: true),
+      Marker(
+          markerId: const MarkerId("pickup_marker"),
+          position: LatLng(
+              widget.rideData['pickup_lat'], widget.rideData['pickup_lng']),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)),
+      Marker(
+          markerId: const MarkerId("drop_marker"),
+          position:
+              LatLng(widget.rideData['drop_lat'], widget.rideData['drop_lng']),
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure)),
+    };
+  }
+
+  // Fuzzy Finder (Keep this from previous step)
+  dynamic _fuzzyGet(Map<String, dynamic> data, String targetKey) {
+    if (data.containsKey(targetKey)) return data[targetKey];
+    for (String key in data.keys) {
+      if (key.trim() == targetKey) return data[key];
+    }
+    return null;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(children: [
-        FlutterMap(
-          options: MapOptions(center: driverLocation, zoom: 15),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-              subdomains: ['a', 'b', 'c'],
-              backgroundColor: Colors.black,
-            ),
-            PolylineLayer(
-              polylines: [
-                Polyline(
-                  points: routePoints,
-                  strokeWidth: 6,
-                  color: Colors.blueAccent,
-                )
-              ],
-            ),
-            MarkerLayer(
-              markers: [
-                Marker(
-                  point: pickupLocation,
-                  child: Icon(Icons.my_location, color: Colors.greenAccent, size: 30),
-                ),
-                Marker(
-                  point: dropLocation,
-                  child: Icon(Icons.flag_circle_outlined, color: Colors.redAccent, size: 30),
-                ),
-                Marker(
-                  point: driverLocation,
-                  width: _carSize,
-                  height: _carSize,
-                  child: Transform.rotate(
-                    angle: _carBearing,
-                    child:  Icon(Icons.directions_car_filled, size: 40, color: Colors.blue)
-,
-                  ),
-                )
-              ],
-            )
-          ],
-        ),
-        Positioned(
-          bottom: 0,
-          left: 0,
-          right: 0,
-          child: SlidingUpPanel(
-            controller: _panelController,
-            minHeight: 280,
-            maxHeight: 400,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            panel: _buildBottomSheet(),
-            color: Colors.transparent,
+      body: Stack(
+        children: [
+          StreamBuilder<DocumentSnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('rides')
+                .doc(widget.rideId)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData || !snapshot.data!.exists) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final remoteData = snapshot.data!.data() as Map<String, dynamic>;
+
+              final rawLat = _fuzzyGet(remoteData, 'driver_lat');
+              final rawLng = _fuzzyGet(remoteData, 'driver_lng');
+              final rawHeading = _fuzzyGet(remoteData, 'driver_heading');
+
+              // Firestore data (Fallbacks)
+              final double fsLat = (rawLat is num
+                      ? rawLat.toDouble()
+                      : double.tryParse(rawLat.toString())) ??
+                  widget.rideData['pickup_lat'] - 0.001;
+              final double fsLng = (rawLng is num
+                      ? rawLng.toDouble()
+                      : double.tryParse(rawLng.toString())) ??
+                  widget.rideData['pickup_lng'] - 0.001;
+              final LatLng fsPos = LatLng(fsLat, fsLng);
+              final double fsHeading = (rawHeading is num
+                      ? rawHeading.toDouble()
+                      : double.tryParse(rawHeading?.toString() ?? "0")) ??
+                  0.0;
+
+              // 🔥 OVERRIDE: If simulation is running, use _simulatedPos, otherwise use Firestore
+              final LatLng effectivePos = _simulatedPos ?? fsPos;
+              final double effectiveHeading = _simulatedHeading ?? fsHeading;
+
+              // Only auto-update camera if NOT simulating (Simulation handles its own camera)
+              if (_simulatedPos == null && _previousPos != effectivePos) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _previousPos = effectivePos;
+                  _updateLiveApproachPath(effectivePos);
+                  _moveCameraToPosition(effectivePos);
+                });
+              }
+
+              return GoogleMap(
+                initialCameraPosition:
+                    CameraPosition(target: effectivePos, zoom: 15),
+                markers: _buildMapMarkers(effectivePos, effectiveHeading),
+                polylines: _trackPolylines,
+                onMapCreated: (ctrl) {
+                  if (!_mapCompleter.isCompleted) _mapCompleter.complete(ctrl);
+                },
+                myLocationEnabled: false,
+                zoomControlsEnabled: false,
+              );
+            },
           ),
-        )
+          Positioned(top: 60, right: 20, child: _buildOtpDisplay()),
+          SlidingUpPanel(
+            minHeight: 280,
+            maxHeight: 450,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            color: Colors.black87,
+            panel: _buildInformationPanel(),
+          ),
+        ],
+      ),
+
+      // 🕹️ TEST BUTTON
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: Colors.white,
+        onPressed: () {
+          // Start simulation from current pickup or a known default
+          // For robustness, we just assume driver starts somewhat near pickup or just use pickup for demo
+          _startDummyDrive(LatLng(widget.rideData['pickup_lat'] - 0.001,
+              widget.rideData['pickup_lng'] - 0.001));
+        },
+        child: const Icon(Icons.play_arrow, color: Colors.black),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.startTop,
+    );
+  }
+
+  Widget _buildOtpDisplay() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+          color: Colors.orange, borderRadius: BorderRadius.circular(12)),
+      child: Column(children: [
+        const Text("START OTP",
+            style: TextStyle(color: Colors.white, fontSize: 10)),
+        Text(widget.rideData['otp'].toString(),
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.bold)),
       ]),
     );
   }
+
+  Widget _buildInformationPanel() {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(children: [
+        Center(child: Container(width: 40, height: 4, color: Colors.grey[700])),
+        const SizedBox(height: 20),
+        ListTile(
+          leading: const CircleAvatar(
+              radius: 25,
+              backgroundColor: Colors.blueGrey,
+              child: Icon(Icons.person, color: Colors.white)),
+          title: Text(widget.rideData['driver_name'] ?? "Raj Singh",
+              style: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.bold)),
+          subtitle: const Text("Swift Dzire • DL 1CA 1234",
+              style: TextStyle(color: Colors.grey)),
+          trailing: const CircleAvatar(
+              backgroundColor: Colors.green,
+              child: Icon(Icons.call, color: Colors.white)),
+        ),
+        const Divider(height: 40, color: Colors.white12),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          RideInfoItem(title: "PICKUP ETA", detail: "3 mins"),
+          RideInfoItem(title: "TRIP TIME", detail: "14 mins"),
+        ]),
+        const SizedBox(height: 25),
+        RideLocationRow(
+            icon: Icons.my_location,
+            iconColor: Colors.green,
+            title: "Pickup",
+            desc: widget.rideData['pickup_name'] ?? ""),
+        RideLocationRow(
+            icon: Icons.flag,
+            iconColor: Colors.blueAccent,
+            title: "Drop",
+            desc: widget.rideData['drop_name'] ?? ""),
+      ]),
+    );
+  }
+}
+
+// Helpers
+class RideInfoItem extends StatelessWidget {
+  final String title;
+  final String detail;
+  const RideInfoItem({super.key, required this.title, required this.detail});
+  @override
+  Widget build(BuildContext context) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: const TextStyle(color: Colors.grey, fontSize: 11)),
+        Text(detail,
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold)),
+      ]);
+}
+
+class RideLocationRow extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String desc;
+  const RideLocationRow(
+      {super.key,
+      required this.icon,
+      required this.iconColor,
+      required this.title,
+      required this.desc});
+  @override
+  Widget build(BuildContext context) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(children: [
+        Icon(icon, color: iconColor, size: 20),
+        const SizedBox(width: 12),
+        Expanded(
+            child: Text("$title: $desc",
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+                overflow: TextOverflow.ellipsis)),
+      ]));
 }

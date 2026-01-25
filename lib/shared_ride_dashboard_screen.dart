@@ -140,11 +140,12 @@
 //   }
 // }
 
-
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:rayride/services/booking_service.dart'; // Access syncOfflineBookings()
+
 import 'live_ride_tracking_screen.dart';
-import 'package:rayride/booking_service.dart'; // Access syncOfflineBookings()
 
 class SharedRideDashboardScreen extends StatefulWidget {
   final String dropLocation;
@@ -203,9 +204,7 @@ class _SharedRideDashboardScreenState extends State<SharedRideDashboardScreen> {
 
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      appBar: AppBar(
-        title: const Text('Ride Dashboard'),
-      ),
+      appBar: AppBar(title: const Text('Ride Dashboard')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
@@ -218,13 +217,18 @@ class _SharedRideDashboardScreenState extends State<SharedRideDashboardScreen> {
 
             // Occupancy Progress
             Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               elevation: 4,
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
                   children: [
-                    const Text("Seats Occupied", style: TextStyle(fontSize: 18)),
+                    const Text(
+                      "Seats Occupied",
+                      style: TextStyle(fontSize: 18),
+                    ),
                     const SizedBox(height: 10),
                     LinearProgressIndicator(
                       value: progress,
@@ -241,10 +245,30 @@ class _SharedRideDashboardScreenState extends State<SharedRideDashboardScreen> {
             const SizedBox(height: 20),
 
             // Ride Info Cards
-            buildInfoTile("Next Pickup", pickups[index], Icons.location_on, Colors.green),
-            buildInfoTile("Next Drop-off", drops[index], Icons.flag, Colors.red),
-            buildInfoTile("Drop Location", widget.dropLocation, Icons.location_pin, Colors.blue),
-            buildInfoTile("Estimated Fare", widget.fare, Icons.attach_money, Colors.orange),
+            buildInfoTile(
+              "Next Pickup",
+              pickups[index],
+              Icons.location_on,
+              Colors.green,
+            ),
+            buildInfoTile(
+              "Next Drop-off",
+              drops[index],
+              Icons.flag,
+              Colors.red,
+            ),
+            buildInfoTile(
+              "Drop Location",
+              widget.dropLocation,
+              Icons.location_pin,
+              Colors.blue,
+            ),
+            buildInfoTile(
+              "Estimated Fare",
+              widget.fare,
+              Icons.attach_money,
+              Colors.orange,
+            ),
 
             const SizedBox(height: 25),
 
@@ -253,7 +277,10 @@ class _SharedRideDashboardScreenState extends State<SharedRideDashboardScreen> {
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => LiveRideTrackingScreen()),
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        LiveRideTrackingScreen(rideId: "TEST_RIDE_001"),
+                  ),
                 );
               },
               icon: const Icon(Icons.navigation),

@@ -59,12 +59,13 @@
 //   }
 // }
 
-
 import 'dart:convert';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  static const String baseUrl = 'http://localhost:3000/api/rides'; // ✅ Base only
+  static const String baseUrl = "http://10.0.2.2:3000/api"; // ✅ Base only
 
   static Future<http.Response> bookRide({
     required String commuterId,
@@ -117,14 +118,36 @@ class ApiService {
 
     return response.statusCode == 200;
   }
+  //
+  // static Future<List<dynamic>> getActiveRides() async {
+  //   // final url = Uri.parse('$baseUrl/active');
+  //   // final response = await http.get(url);
+  //   // if (response.statusCode == 200) {
+  //   //   return json.decode(response.body);
+  //   // } else {
+  //   //   throw Exception('Failed to load active rides');
+  //   // }
+  // }
 
-  static Future<List<dynamic>> getActiveRides() async {
-    final url = Uri.parse('$baseUrl/active');
-    final response = await http.get(url);
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to load active rides');
+  static Future<List<Map<String, dynamic>>> getActiveRides() async {
+    try {
+      // 1. Access the 'rides' collection
+      // 2. Filter for rides where status is 'searching' (not yet accepted)
+      QuerySnapshot snapshot = await FirebaseFirestore.instance
+          .collection('rides')
+          .where('status', isEqualTo: 'searching')
+          .get();
+
+      // 3. Convert the documents into a List of Maps
+      // We include the document ID as 'id' to help with the "Accept" logic later
+      return snapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        data['id'] = doc.id;
+        return data;
+      }).toList();
+    } catch (e) {
+      print("❌ Firestore Fetch Error: $e");
+      return []; // Return empty list on error to prevent crashes
     }
   }
 

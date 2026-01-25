@@ -1,825 +1,227 @@
-// // import 'package:flutter/material.dart';
-// // import 'package:tcard/tcard.dart';
-// // import 'package:google_fonts/google_fonts.dart';
-// // import 'package:rayride/Ride_offer.dart';
-
-// // class fareofferscreen extends StatelessWidget {
-// //   final List<Rideoffer> offers = [
-// //     Rideoffer(
-// //       pickup: 'DTU Rohini',
-// //       drop: 'India Gate',
-// //       fare: 520.0,
-// //       distance: 33,
-// //       status: 'pending',
-// //       expirytime: DateTime.now().add(Duration(hours: 1)),
-// //     ),
-// //     Rideoffer(
-// //       pickup: 'Connaught Place',
-// //       drop: 'Rajiv Chowk',
-// //       fare: 150.0,
-// //       distance: 5,
-// //       status: 'accepted',
-// //       expirytime: DateTime.now().add(Duration(hours: 2)),
-// //     ),
-// //     Rideoffer(
-// //       pickup: 'Dwarka Sector 21',
-// //       drop: 'IGI Airport',
-// //       fare: 300.0,
-// //       distance: 15,
-// //       status: 'rejected',
-// //       expirytime: DateTime.now().add(Duration(hours: 1)),
-// //     ),
-// //     Rideoffer(
-// //       pickup: 'Khan Market',
-// //       drop: 'Lodhi Garden',
-// //       fare: 200.0,
-// //       distance: 8,
-// //       status: 'pending',
-// //       expirytime: DateTime.now().add(Duration(hours: 3)),
-// //     ),
-// //     Rideoffer(
-// //       pickup: 'Saket',
-// //       drop: 'Select Citywalk',
-// //       fare: 180.0,
-// //       distance: 6,
-// //       status: 'accepted',
-// //       expirytime: DateTime.now().add(Duration(hours: 2)),
-// //     ),
-// //     Rideoffer(
-// //       pickup: 'Noida Sector 18',
-// //       drop: 'DLF Mall of India',
-// //       fare: 250.0,
-// //       distance: 10,
-// //       status: 'pending',
-// //       expirytime: DateTime.now().add(Duration(hours: 1)),
-// //     ),
-// //     Rideoffer(
-// //       pickup: 'Gurgaon Cyber Hub',
-// //       drop: 'MG Road',
-// //       fare: 220.0,
-// //       distance: 12,
-// //       status: 'rejected',
-// //       expirytime: DateTime.now().add(Duration(hours: 2)),
-// //     ),
-// //     Rideoffer(
-// //       pickup: 'Chandni Chowk',
-// //       drop: 'Red Fort',
-// //       fare: 100.0,
-// //       distance: 4,
-// //       status: 'pending',
-// //       expirytime: DateTime.now().add(Duration(hours: 1)),
-// //     ),
-// //   ];
-
-// //    fareofferscreen({super.key});
-
-// //   @override
-// //   Widget build(BuildContext context) {
-// //     final TCardController controller = TCardController();
-
-// //     List<Widget> cards = offers.map((offer) {
-// //       return Container(
-// //         width: MediaQuery.of(context).size.width * 0.9,
-// //         margin: EdgeInsets.symmetric(horizontal: 10, vertical: 20),
-// //         padding: EdgeInsets.all(16),
-// //         decoration: BoxDecoration(
-// //           gradient: LinearGradient(
-// //             colors: [Colors.blue.shade100, Colors.white],
-// //             begin: Alignment.topLeft,
-// //             end: Alignment.bottomRight,
-// //           ),
-// //           borderRadius: BorderRadius.circular(20),
-// //           boxShadow: [
-// //             BoxShadow(
-// //               color: Colors.grey.shade400,
-// //               blurRadius: 10,
-// //               offset: Offset(2, 4),
-// //             )
-// //           ],
-// //         ),
-// //         child: Column(
-// //           crossAxisAlignment: CrossAxisAlignment.stretch,
-// //           children: [
-// //             // Header
-// //             Row(
-// //               children: [
-// //                 CircleAvatar(
-// //                   radius: 26,
-// //                   backgroundColor: Colors.blue.shade300,
-// //                   child: Text(
-// //                     offer.pickup[0],
-// //                     style: TextStyle(fontSize: 22, color: Colors.white),
-// //                   ),
-// //                 ),
-// //                 SizedBox(width: 12),
-// //                 Expanded(
-// //                   child: Text(
-// //                     'From ${offer.pickup}',
-// //                     style: GoogleFonts.lato(
-// //                       fontSize: 20,
-// //                       fontWeight: FontWeight.bold,
-// //                     ),
-// //                   ),
-// //                 ),
-// //                 Chip(
-// //                   label: Text(
-// //                     offer.status.toUpperCase(),
-// //                     style: TextStyle(color: Colors.white),
-// //                   ),
-// //                   backgroundColor: {
-// //                     'accepted': Colors.green,
-// //                     'pending': Colors.orange,
-// //                     'rejected': Colors.red,
-// //                   }[offer.status]!,
-// //                 ),
-// //               ],
-// //             ),
-// //             SizedBox(height: 12),
-
-// //             _infoTile(Icons.flag, 'Drop', offer.drop),
-// //             _infoTile(Icons.currency_rupee, 'Fare',
-// //                 '₹${offer.fare.toStringAsFixed(2)}'),
-// //             _infoTile(Icons.route, 'Distance', '${offer.distance} km'),
-// //             _infoTile(Icons.timer, 'Expires at',
-// //                 '${offer.expirytime.hour}:${offer.expirytime.minute.toString().padLeft(2, '0')}'),
-// //             SizedBox(height: 16),
-
-// //             Row(
-// //               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-// //               children: [
-// //                 ElevatedButton.icon(
-// //                   onPressed: () {
-// //                     controller.forward(direction: SwipDirection.Right);
-// //                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-// //                         content: Text("Offer Accepted from ${offer.pickup}")));
-// //                   },
-// //                   icon: Icon(Icons.check),
-// //                   label: Text("Accept"),
-// //                   style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-// //                 ),
-// //                 ElevatedButton.icon(
-// //                   onPressed: () {
-// //                     controller.forward(direction: SwipDirection.Left);
-// //                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-// //                         content: Text("Offer Rejected from ${offer.pickup}")));
-// //                   },
-// //                   icon: Icon(Icons.close),
-// //                   label: Text("Reject"),
-// //                   style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-// //                 ),
-// //               ],
-// //             ),
-// //           ],
-// //         ),
-// //       );
-// //     }).toList();
-
-// //     return Scaffold(
-// //       appBar: AppBar(
-// //         title: Text("Ride Offers", style: GoogleFonts.poppins(fontSize: 22)),
-// //         centerTitle: true,
-// //         backgroundColor: Colors.blue.shade600,
-// //       ),
-// //       body: LayoutBuilder(
-// //         builder: (context, constraints) {
-// //           return TCard(
-// //             controller: controller,
-// //             size: Size(constraints.maxWidth, constraints.maxHeight * 0.82),
-// //             cards: cards,
-// //             onForward: (index, info) {
-// //               if (index == cards.length) {
-// //                 ScaffoldMessenger.of(context).showSnackBar(
-// //                   SnackBar(content: Text("No more offers left")),
-// //                 );
-// //               }
-// //             },
-// //           );
-// //         },
-// //       ),
-// //     );
-// //   }
-
-// //   Widget _infoTile(IconData icon, String label, String value) {
-// //     return Padding(
-// //       padding: EdgeInsets.symmetric(vertical: 4.0),
-// //       child: Row(
-// //         children: [
-// //           Icon(icon, size: 20, color: Colors.black54),
-// //           SizedBox(width: 8),
-// //           Text('$label: ',
-// //               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-// //           Expanded(
-// //             child: Text(value, style: TextStyle(fontSize: 15)),
-// //           ),
-// //         ],
-// //       ),
-// //     );
-// //   }
-// // }
-
-// // ✅ Import your backend service
-// import 'package:flutter/material.dart';
-// import 'package:tcard/tcard.dart';
-// import 'package:google_fonts/google_fonts.dart';
-// import 'package:rayride/Ride_offer.dart';
-// import 'package:rayride/api_services.dart'; // Ensure this import is present
-
-// class fareofferscreen extends StatelessWidget {
-//   final List<Rideoffer> offers = [
-//     Rideoffer(
-//       pickup: 'DTU Rohini',
-//       drop: 'India Gate',
-//       fare: 520.0,
-//       distance: 33,
-//       status: 'pending',
-//       expirytime: DateTime.now().add(Duration(hours: 1)),
-//     ),
-//     Rideoffer(
-//       pickup: 'Connaught Place',
-//       drop: 'Rajiv Chowk',
-//       fare: 150.0,
-//       distance: 5,
-//       status: 'accepted',
-//       expirytime: DateTime.now().add(Duration(hours: 2)),
-//     ),
-//     Rideoffer(
-//       pickup: 'Dwarka Sector 21',
-//       drop: 'IGI Airport',
-//       fare: 300.0,
-//       distance: 15,
-//       status: 'rejected',
-//       expirytime: DateTime.now().add(Duration(hours: 1)),
-//     ),
-//     Rideoffer(
-//       pickup: 'Khan Market',
-//       drop: 'Lodhi Garden',
-//       fare: 200.0,
-//       distance: 8,
-//       status: 'pending',
-//       expirytime: DateTime.now().add(Duration(hours: 3)),
-//     ),
-//     Rideoffer(
-//       pickup: 'Saket',
-//       drop: 'Select Citywalk',
-//       fare: 180.0,
-//       distance: 6,
-//       status: 'accepted',
-//       expirytime: DateTime.now().add(Duration(hours: 2)),
-//     ),
-//     Rideoffer(
-//       pickup: 'Noida Sector 18',
-//       drop: 'DLF Mall of India',
-//       fare: 250.0,
-//       distance: 10,
-//       status: 'pending',
-//       expirytime: DateTime.now().add(Duration(hours: 1)),
-//     ),
-//     Rideoffer(
-//       pickup: 'Gurgaon Cyber Hub',
-//       drop: 'MG Road',
-//       fare: 220.0,
-//       distance: 12,
-//       status: 'rejected',
-//       expirytime: DateTime.now().add(Duration(hours: 2)),
-//     ),
-//     Rideoffer(
-//       pickup: 'Chandni Chowk',
-//       drop: 'Red Fort',
-//       fare: 100.0,
-//       distance: 4,
-//       status: 'pending',
-//       expirytime: DateTime.now().add(Duration(hours: 1)),
-//     ),
-//   ];
-
-//    fareofferscreen({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     final TCardController controller = TCardController();
-
-//     List<Widget> cards = offers.map((offer) {
-//       return Container(
-//         width: MediaQuery.of(context).size.width * 0.9,
-//         margin: EdgeInsets.symmetric(horizontal: 10, vertical: 20),
-//         padding: EdgeInsets.all(16),
-//         decoration: BoxDecoration(
-//           gradient: LinearGradient(
-//             colors: [Colors.blue.shade100, Colors.white],
-//             begin: Alignment.topLeft,
-//             end: Alignment.bottomRight,
-//           ),
-//           borderRadius: BorderRadius.circular(20),
-//           boxShadow: [
-//             BoxShadow(
-//               color: Colors.grey.shade400,
-//               blurRadius: 10,
-//               offset: Offset(2, 4),
-//             )
-//           ],
-//         ),
-//         child: Column(
-//           crossAxisAlignment: CrossAxisAlignment.stretch,
-//           children: [
-//             Row(
-//               children: [
-//                 CircleAvatar(
-//                   radius: 26,
-//                   backgroundColor: Colors.blue.shade300,
-//                   child: Text(
-//                     offer.pickup[0],
-//                     style: TextStyle(fontSize: 22, color: Colors.white),
-//                   ),
-//                 ),
-//                 SizedBox(width: 12),
-//                 Expanded(
-//                   child: Text(
-//                     'From ${offer.pickup}',
-//                     style: GoogleFonts.lato(
-//                       fontSize: 20,
-//                       fontWeight: FontWeight.bold,
-//                     ),
-//                   ),
-//                 ),
-//                 Chip(
-//                   label: Text(
-//                     offer.status.toUpperCase(),
-//                     style: TextStyle(color: Colors.white),
-//                   ),
-//                   backgroundColor: {
-//                     'accepted': Colors.green,
-//                     'pending': Colors.orange,
-//                     'rejected': Colors.red,
-//                   }[offer.status]!,
-//                 ),
-//               ],
-//             ),
-//             SizedBox(height: 12),
-
-//             _infoTile(Icons.flag, 'Drop', offer.drop),
-//             _infoTile(Icons.currency_rupee, 'Fare',
-//                 '₹${offer.fare.toStringAsFixed(2)}'),
-//             _infoTile(Icons.route, 'Distance', '${offer.distance} km'),
-//             _infoTile(Icons.timer, 'Expires at',
-//                 '${offer.expirytime.hour}:${offer.expirytime.minute.toString().padLeft(2, '0')}'),
-//             SizedBox(height: 16),
-
-//             Row(
-//               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-//               children: [
-//                 ElevatedButton.icon(
-//                   onPressed: () async {
-//                     controller.forward(direction: SwipDirection.Right);
-//                     final success = await ApiService.acceptRide(
-//                       pickup: offer.pickup,
-//                       drop: offer.drop,
-//                       fare: offer.fare,
-//                     );
-
-//                     if (success) {
-//                       ScaffoldMessenger.of(context).showSnackBar(
-//                         SnackBar(content: Text("✅ Offer Accepted from ${offer.pickup}")),
-//                       );
-//                     } else {
-//                       ScaffoldMessenger.of(context).showSnackBar(
-//                         SnackBar(content: Text("❌ Failed to accept offer.")),
-//                       );
-//                     }
-//                   },
-//                   icon: Icon(Icons.check),
-//                   label: Text("Accept"),
-//                   style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-//                 ),
-//                 ElevatedButton.icon(
-//                   onPressed: () {
-//                     controller.forward(direction: SwipDirection.Left);
-//                     ScaffoldMessenger.of(context).showSnackBar(
-//                       SnackBar(content: Text("Offer Rejected from ${offer.pickup}")),
-//                     );
-//                   },
-//                   icon: Icon(Icons.close),
-//                   label: Text("Reject"),
-//                   style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-//                 ),
-//               ],
-//             ),
-//           ],
-//         ),
-//       );
-//     }).toList();
-
-//     return Scaffold(
-//       appBar: AppBar(
-//         title: Text("Ride Offers", style: GoogleFonts.poppins(fontSize: 22)),
-//         centerTitle: true,
-//         backgroundColor: Colors.blue.shade600,
-//       ),
-//       body: LayoutBuilder(
-//         builder: (context, constraints) {
-//           return TCard(
-//             controller: controller,
-//             size: Size(constraints.maxWidth, constraints.maxHeight * 0.82),
-//             cards: cards,
-//             onForward: (index, info) {
-//               if (index == cards.length) {
-//                 ScaffoldMessenger.of(context).showSnackBar(
-//                   SnackBar(content: Text("No more offers left")),
-//                 );
-//               }
-//             },
-//           );
-//         },
-//       ),
-//     );
-//   }
-
-//   Widget _infoTile(IconData icon, String label, String value) {
-//     return Padding(
-//       padding: EdgeInsets.symmetric(vertical: 4.0),
-//       child: Row(
-//         children: [
-//           Icon(icon, size: 20, color: Colors.black54),
-//           SizedBox(width: 8),
-//           Text('$label: ',
-//               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-//           Expanded(
-//             child: Text(value, style: TextStyle(fontSize: 15)),
-//           ),
-//         ],
-//       ),
-//     );
-//   }
-// }
-
-// import 'package:flutter/material.dart';
-// import 'package:tcard/tcard.dart';
-// import 'package:google_fonts/google_fonts.dart';
-// import 'package:rayride/Ride_offer.dart';
-// import 'package:rayride/api_services.dart';
-// import 'package:hive/hive.dart';
-
-// class fareofferscreen extends StatefulWidget {
-//   fareofferscreen({super.key});
-
-//   @override
-//   State<fareofferscreen> createState() => _fareofferscreenState();
-// }
-
-// class _fareofferscreenState extends State<fareofferscreen> {
-//   final TCardController controller = TCardController();
-//   List<dynamic> rideOffers = [];
-
-//   @override
-//   void initState() {
-//     super.initState();
-//     fetchOffers();
-//   }
-
-//   Future<void> fetchOffers() async {
-//     final box = await Hive.openBox('userBox');
-//     final userId = box.get('userId') ?? 'demoDriver';
-//     try {
-//       final allRides = await ApiService.getActiveRides();
-//       setState(() {
-//         rideOffers = allRides.where((ride) => ride['driverId'] == null).toList();
-//       });
-//     } catch (e) {
-//       print("❌ Error fetching offers: $e");
-//     }
-//   }
-
-//   Future<void> acceptThisRide(String rideId) async {
-//     final box = await Hive.openBox('userBox');
-//     final driverId = box.get('userId') ?? 'demoDriver';
-//     final success = await ApiService.acceptRide(
-//       rideId: rideId,
-//       driverId: driverId,
-//     );
-
-//     if (success) {
-//       ScaffoldMessenger.of(context).showSnackBar(
-//         SnackBar(content: Text("✅ Ride Accepted!")),
-//       );
-//       fetchOffers();
-//     } else {
-//       ScaffoldMessenger.of(context).showSnackBar(
-//         SnackBar(content: Text("❌ Failed to accept ride.")),
-//       );
-//     }
-//   }
-
-//   @override
-//   Widget build(BuildContext context) {
-//     List<Widget> cards = rideOffers.map((offer) {
-//       return Container(
-//         width: MediaQuery.of(context).size.width * 0.9,
-//         margin: EdgeInsets.symmetric(horizontal: 10, vertical: 20),
-//         padding: EdgeInsets.all(16),
-//         decoration: BoxDecoration(
-//           gradient: LinearGradient(
-//             colors: [Colors.blue.shade100, Colors.white],
-//             begin: Alignment.topLeft,
-//             end: Alignment.bottomRight,
-//           ),
-//           borderRadius: BorderRadius.circular(20),
-//           boxShadow: [
-//             BoxShadow(
-//               color: Colors.grey.shade400,
-//               blurRadius: 10,
-//               offset: Offset(2, 4),
-//             )
-//           ],
-//         ),
-//         child: Column(
-//           crossAxisAlignment: CrossAxisAlignment.stretch,
-//           children: [
-//             Row(
-//               children: [
-//                 CircleAvatar(
-//                   radius: 26,
-//                   backgroundColor: Colors.blue.shade300,
-//                   child: Text(
-//                     offer['pickup']['address'][0],
-//                     style: TextStyle(fontSize: 22, color: Colors.white),
-//                   ),
-//                 ),
-//                 SizedBox(width: 12),
-//                 Expanded(
-//                   child: Text(
-//                     'From ${offer['pickup']['address']}',
-//                     style: GoogleFonts.lato(
-//                       fontSize: 20,
-//                       fontWeight: FontWeight.bold,
-//                     ),
-//                   ),
-//                 ),
-//                 Chip(
-//                   label: Text(
-//                     offer['status'].toUpperCase(),
-//                     style: TextStyle(color: Colors.white),
-//                   ),
-//                   backgroundColor: Colors.orange,
-//                 ),
-//               ],
-//             ),
-//             SizedBox(height: 12),
-//             _infoTile(Icons.flag, 'Drop', offer['drop']['address']),
-//             _infoTile(Icons.currency_rupee, 'Fare', '₹${offer['fare']}'),
-//             SizedBox(height: 16),
-//             Row(
-//               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-//               children: [
-//                 ElevatedButton.icon(
-//                   onPressed: () {
-//                     controller.forward(direction: SwipDirection.Right);
-//                     acceptThisRide(offer['id']);
-//                   },
-//                   icon: Icon(Icons.check),
-//                   label: Text("Accept"),
-//                   style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-//                 ),
-//                 ElevatedButton.icon(
-//                   onPressed: () {
-//                     controller.forward(direction: SwipDirection.Left);
-//                     ScaffoldMessenger.of(context).showSnackBar(
-//                       SnackBar(content: Text("Ride Rejected!")),
-//                     );
-//                   },
-//                   icon: Icon(Icons.close),
-//                   label: Text("Reject"),
-//                   style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-//                 ),
-//               ],
-//             ),
-//           ],
-//         ),
-//       );
-//     }).toList();
-
-//     return Scaffold(
-//       appBar: AppBar(
-//         title: Text("Ride Offers", style: GoogleFonts.poppins(fontSize: 22)),
-//         centerTitle: true,
-//         backgroundColor: Colors.blue.shade600,
-//       ),
-//       body: LayoutBuilder(
-//         builder: (context, constraints) {
-//           return TCard(
-//             controller: controller,
-//             size: Size(constraints.maxWidth, constraints.maxHeight * 0.82),
-//             cards: cards,
-//             onForward: (index, info) {
-//               if (index == cards.length) {
-//                 ScaffoldMessenger.of(context).showSnackBar(
-//                   SnackBar(content: Text("No more offers left")),
-//                 );
-//               }
-//             },
-//           );
-//         },
-//       ),
-//     );
-//   }
-
-//   Widget _infoTile(IconData icon, String label, String value) {
-//     return Padding(
-//       padding: EdgeInsets.symmetric(vertical: 4.0),
-//       child: Row(
-//         children: [
-//           Icon(icon, size: 20, color: Colors.black54),
-//           SizedBox(width: 8),
-//           Text('$label: ',
-//               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-//           Expanded(
-//             child: Text(value, style: TextStyle(fontSize: 15)),
-//           ),
-//         ],
-//       ),
-//     );
-//   }
-// }
-
-
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:tcard/tcard.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:rayride/api_services.dart';
-import 'package:hive/hive.dart';
+import 'package:tcard/tcard.dart';
 
-class fareofferscreen extends StatefulWidget {
-  const fareofferscreen({super.key});
+import 'driver_map_tracking_screen.dart';
+
+class fareOfferScreen extends StatefulWidget {
+  const fareOfferScreen({super.key});
 
   @override
-  State<fareofferscreen> createState() => _fareofferscreenState();
+  State<fareOfferScreen> createState() => _fareOfferScreenState();
 }
 
-class _fareofferscreenState extends State<fareofferscreen> {
-  final TCardController controller = TCardController();
-  List<dynamic> rideOffers = [];
+class _fareOfferScreenState extends State<fareOfferScreen> {
+  final TCardController _controller = TCardController();
+  List<Map<String, dynamic>> rideOffers = [];
+  bool isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    fetchOffers();
+    fetchOffers(); // Initial scan on load
   }
 
+  /// Task: Fetch all 'searching' rides directly from Firestore
+  /// We have removed the 500m proximity filter per your request.
   Future<void> fetchOffers() async {
-    final box = await Hive.openBox('userBox');
-    final userId = box.get('userId') ?? 'demoDriver';
+    setState(() => isLoading = true);
     try {
-      final allRides = await ApiService.getActiveRides();
+      // Fetching all rides with 'searching' status
+      QuerySnapshot snapshot = await FirebaseFirestore.instance
+          .collection('rides')
+          .where('status', isEqualTo: 'searching')
+          .get();
+
       setState(() {
-        rideOffers = allRides.where((ride) => ride['driverId'] == null).toList();
+        rideOffers = snapshot.docs.map((doc) {
+          var data = doc.data() as Map<String, dynamic>;
+          data['id'] = doc.id; // Map document ID for acceptance
+          return data;
+        }).toList();
+        isLoading = false;
       });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text("Scan complete: ${rideOffers.length} rides found")),
+      );
     } catch (e) {
-      print("❌ Error fetching offers: $e");
+      debugPrint("❌ Scan failed: $e");
+      setState(() => isLoading = false);
     }
   }
 
-  Future<void> acceptThisRide(String rideId) async {
-    final box = await Hive.openBox('userBox');
-    final driverId = box.get('userId') ?? 'demoDriver';
-    final success = await ApiService.acceptRide(
-      rideId: rideId,
-      driverId: driverId,
-    );
+  /// Logic to accept a ride and move to the map
+  // Inside _fareOfferScreenState
+  Future<void> acceptRide(Map<String, dynamic> offer) async {
+    try {
+      // 1. Check if location services are enabled
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        return Future.error('Location services are disabled.');
+      }
 
-    if (success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("✅ Ride Accepted!")),
+      // 2. Check current permission status
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        // 3. Request permission if it was previously denied
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          // Permissions are denied, next time you could try requesting permissions again
+          return Future.error('Location permissions are denied');
+        }
+      }
+
+      // 4. Handle permanent denial (User must go to settings manually)
+      if (permission == LocationPermission.deniedForever) {
+        return Future.error(
+            'Location permissions are permanently denied, we cannot request permissions.');
+      }
+
+      // 5. If permissions are granted, proceed with fetching position
+      Position position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high);
+
+      await FirebaseFirestore.instance
+          .collection('rides')
+          .doc(offer['id'])
+          .update({
+        'status': 'accepted',
+        'driver_id': 'driver_demo_123',
+        'driver_lat': position.latitude, // Initialize coordinates
+        'driver_lng': position.longitude,
+        'driver_heading': position.heading,
+      });
+
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => DriverMapTrackingScreen(rideData: offer),
+        ),
       );
-      fetchOffers();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("❌ Failed to accept ride.")),
-      );
+    } catch (e) {
+      debugPrint("Accept error: $e");
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    List<Widget> cards = rideOffers.map((offer) {
-      return Container(
-        width: MediaQuery.of(context).size.width * 0.9,
-        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 20),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.blue.shade100, Colors.white],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Available Rides", style: GoogleFonts.poppins()),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: fetchOffers, // Manual scan button
           ),
+        ],
+      ),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : rideOffers.isEmpty
+              ? _buildEmptyState()
+              : Center(
+                  child: TCard(
+                    cards: _buildCards(),
+                    controller: _controller,
+                    size: const Size(360, 420),
+                  ),
+                ),
+      // Task: Primary "Scan Again" button
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: fetchOffers,
+        label: const Text("Scan Again"),
+        icon: const Icon(Icons.search),
+        backgroundColor: Colors.orangeAccent,
+      ),
+    );
+  }
+
+  /// Creates the swipeable card widgets
+  List<Widget> _buildCards() {
+    return rideOffers.map((offer) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
           borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.shade400,
-              blurRadius: 10,
-              offset: const Offset(2, 4),
-            )
-          ],
+          boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10)],
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 26,
-                  backgroundColor: Colors.blue.shade300,
-                  child: Text(
-                    offer['pickup']['address'][0],
-                    style: const TextStyle(fontSize: 22, color: Colors.white),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'From ${offer['pickup']['address']}',
-                    style: GoogleFonts.lato(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                Chip(
-                  label: Text(
-                    offer['status'].toUpperCase(),
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  backgroundColor: Colors.orange,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _infoTile(Icons.flag, 'Drop', offer['drop']['address'] ?? 'Unknown'),
-            _infoTile(Icons.currency_rupee, 'Fare', '₹${offer['fare']}'),
-            const SizedBox(height: 16),
+            Text("Ride Request",
+                style: GoogleFonts.poppins(
+                    fontSize: 18, fontWeight: FontWeight.bold)),
+            const Divider(height: 30),
+
+            // Null-safe address tiles
+            _infoTile(Icons.pin_drop, "Pickup",
+                offer['pickup_name'] ?? "No pickup address"),
+            _infoTile(
+                Icons.flag, "Drop", offer['drop_name'] ?? "No drop address"),
+            _infoTile(Icons.currency_rupee, "Fare", "₹${offer['fare'] ?? '0'}"),
+
+            const Spacer(),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                ElevatedButton.icon(
-                  onPressed: () {
-                    controller.forward(direction: SwipDirection.Right);
-                    acceptThisRide(offer['id']);
-                  },
-                  icon: const Icon(Icons.check),
-                  label: const Text("Accept"),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                ElevatedButton(
+                  onPressed: () => acceptRide(offer),
+                  style:
+                      ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                  child: const Text("Accept",
+                      style: TextStyle(color: Colors.white)),
                 ),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    controller.forward(direction: SwipDirection.Left);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("Ride Rejected!")),
-                    );
-                  },
-                  icon: const Icon(Icons.close),
-                  label: const Text("Reject"),
+                ElevatedButton(
+                  onPressed: () =>
+                      _controller.forward(direction: SwipDirection.Left),
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                  child: const Text("Reject",
+                      style: TextStyle(color: Colors.white)),
                 ),
               ],
-            ),
+            )
           ],
         ),
       );
     }).toList();
+  }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text("Ride Offers", style: GoogleFonts.poppins(fontSize: 22)),
-        centerTitle: true,
-        backgroundColor: Colors.blue.shade600,
-      ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          return TCard(
-            controller: controller,
-            size: Size(constraints.maxWidth, constraints.maxHeight * 0.82),
-            cards: cards,
-            onForward: (index, info) {
-              if (index == cards.length) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("No more offers left")),
-                );
-              }
-            },
-          );
-        },
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.no_transfer, size: 80, color: Colors.grey),
+          const SizedBox(height: 20),
+          Text("No active rides found.",
+              style: GoogleFonts.poppins(color: Colors.grey)),
+          TextButton(
+              onPressed: fetchOffers, child: const Text("Tap to refresh")),
+        ],
       ),
     );
   }
 
   Widget _infoTile(IconData icon, String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          Icon(icon, size: 20, color: Colors.black54),
-          const SizedBox(width: 8),
-          Text('$label: ',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          Icon(icon, color: Colors.blueAccent, size: 20),
+          const SizedBox(width: 12),
+          // Expanded prevents horizontal RenderFlex overflow
           Expanded(
-            child: Text(value, style: const TextStyle(fontSize: 15)),
+            child: Text(
+              "$label: $value",
+              style: GoogleFonts.poppins(fontSize: 14),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+            ),
           ),
         ],
       ),

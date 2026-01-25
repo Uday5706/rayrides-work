@@ -1,65 +1,130 @@
-// lib/offline_bookings_screen.dart
 import 'package:flutter/material.dart';
-import 'package:hive/hive.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:rayride/models/booking_model.dart'; // Ensure this path is correct
 
 class OfflineBookingsScreen extends StatefulWidget {
+  const OfflineBookingsScreen({super.key});
+
   @override
   _OfflineBookingsScreenState createState() => _OfflineBookingsScreenState();
 }
 
 class _OfflineBookingsScreenState extends State<OfflineBookingsScreen> {
-  late Box bookingsBox;
+  // We use a Future to ensure the box is open before we build the listenable
+  late Future<Box> _openBoxFuture;
 
   @override
   void initState() {
     super.initState();
-    _loadBox();
-  }
-
-  Future<void> _loadBox() async {
-    bookingsBox = await Hive.openBox('offline_bookings');
-    setState(() {}); // Rebuild after loading
+    // Pre-opening the box to avoid late initialization crashes
+    _openBoxFuture = Hive.openBox('offline_bookings');
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!Hive.isBoxOpen('offline_bookings')) {
-      return Scaffold(
-        appBar: AppBar(title: Text("Offline Bookings")),
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    final bookings = bookingsBox.values.toList();
-
     return Scaffold(
       appBar: AppBar(
-        title: Text("Offline Bookings"),
         backgroundColor: Colors.deepOrange,
+        centerTitle: true,
+        elevation: 0,
+        title: const Text(
+          "Offline Booking Logs",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
       ),
-      body: bookings.isEmpty
-          ? Center(child: Text("No offline bookings stored."))
-          : ListView.builder(
-              itemCount: bookings.length,
-              itemBuilder: (context, index) {
-                final booking = bookings[index];
-                return Card(
-                  margin: EdgeInsets.all(8),
-                  child: ListTile(
-                    leading: Icon(Icons.directions_car),
-                    title: Text("${booking['pickup']} → ${booking['drop']}"),
-                    subtitle: Text("Fare: ₹${booking['fare']}"),
-                    trailing: IconButton(
-                      icon: Icon(Icons.delete, color: Colors.red),
-                      onPressed: () async {
-                        await bookingsBox.delete(booking['id']);
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                );
-              },
-            ),
+      body: FutureBuilder<Box>(
+        future: _openBoxFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+                child: CircularProgressIndicator(color: Colors.deepOrange));
+          }
+
+          if (snapshot.hasError) {
+            return Center(child: Text("Error opening logs: ${snapshot.error}"));
+          }
+
+          // ValueListenableBuilder listens to Hive changes in real-time
+          return ValueListenableBuilder(
+            valueListenable: snapshot.data!.listenable(),
+            builder: (context, Box box, _) {
+              final bookings = box.values.toList();
+
+              if (bookings.isEmpty) {
+                return _buildEmptyState();
+              }
+
+              return ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                itemCount: bookings.length,
+                itemBuilder: (context, index) {
+                  // Map the Hive data to your Booking Model
+                  final rawData = bookings[index];
+                  final Booking booking =
+                      Booking.fromMap(Map<String, dynamic>.from(rawData));
+
+                  return _buildBookingCard(booking, box);
+                },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildBookingCard(Booking booking, Box box) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      elevation: 3,
+      child: ListTile(
+        contentPadding: const EdgeInsets.all(15),
+        leading: const CircleAvatar(
+          backgroundColor: Colors.orangeAccent,
+          child: Icon(Icons.cloud_off, color: Colors.white),
+        ),
+        title: Text(
+          "${booking.pickup} ➔ ${booking.drop}",
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.fromLTRB(0, 8.0, 0, 0),
+          child: Text(
+            "Fare: ₹${booking.fare.toStringAsFixed(2)}",
+            style: const TextStyle(
+                color: Colors.green, fontWeight: FontWeight.w600),
+          ),
+        ),
+        trailing: IconButton(
+          icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+          onPressed: () async {
+            // Delete using the ID stored in the model
+            await box.delete(booking.id);
+            _showSnackBar("Log deleted");
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.inventory_2_outlined, size: 80, color: Colors.grey[300]),
+          const SizedBox(height: 10),
+          Text("No offline bookings found",
+              style: TextStyle(color: Colors.grey[600])),
+        ],
+      ),
+    );
+  }
+
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
   }
 }

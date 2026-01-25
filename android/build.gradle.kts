@@ -1,8 +1,14 @@
 // android/build.gradle.kts
+plugins {
+    // ...
 
+    // Add the dependency for the Google services Gradle plugin
+    id("com.google.gms.google-services")
+
+}
 buildscript {
     dependencies {
-        classpath("com.google.gms:google-services:4.3.15")
+        classpath("com.google.gms:google-services:4.4.0")
     }
     repositories {
         google()
