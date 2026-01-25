@@ -1,12 +1,13 @@
 import 'dart:async';
-import 'dart:math' as math; // Import math for bearing calculation
 import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:rayride/services/rider_socket_service.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
 
 class LiveRideTrackingScreen extends StatefulWidget {
@@ -28,12 +29,12 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
 
   Set<Polyline> _trackPolylines = {};
   BitmapDescriptor? _customCarIcon;
-  LatLng? _previousPos;
 
-  // --- SIMULATION VARIABLES ---
-  Timer? _demoTimer;
-  LatLng? _simulatedPos; // If not null, map uses this instead of Firestore
-  double? _simulatedHeading; // If not null, map uses this
+  // Socket State
+  final RiderSocketService _socketService = RiderSocketService();
+  LatLng? _liveSocketPos;
+  double _liveSocketHeading = 0.0;
+  LatLng? _lastPathUpdatePos;
 
   final String _googleMapsKey = dotenv.env['GOOGLE_MAPS_API_KEY'] ?? "";
   late final PolylinePoints _polylineHelper =
@@ -43,25 +44,100 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
   void initState() {
     super.initState();
     _initAssets();
+    _connectSocket();
   }
 
   @override
   void dispose() {
-    _demoTimer?.cancel(); // Cleanup timer
+    _socketService.disconnect();
     super.dispose();
   }
 
+  void _connectSocket() {
+    _socketService.connect(
+      widget.rideId,
+      onLocation: ({required position, required heading}) {
+        // Run inside setState to update the UI
+        if (mounted) {
+          setState(() {
+            _liveSocketPos = position;
+            _liveSocketHeading = heading;
+          });
+
+          // Move camera to follow car
+          _moveCameraToPosition(position);
+
+          // Update path (throttled)
+          _throttledPathUpdate(position);
+        }
+      },
+    );
+  }
+
+  // --- Map Helpers ---
+  Future<void> _moveCameraToPosition(LatLng pos) async {
+    if (_mapCompleter.isCompleted) {
+      final controller = await _mapCompleter.future;
+      controller.animateCamera(CameraUpdate.newCameraPosition(
+          CameraPosition(target: pos, zoom: 16, tilt: 40)));
+    }
+  }
+
+  void _throttledPathUpdate(LatLng currentPos) {
+    if (_lastPathUpdatePos == null) {
+      _lastPathUpdatePos = currentPos;
+      _updateLiveApproachPath(currentPos);
+      return;
+    }
+    double distance = Geolocator.distanceBetween(
+      _lastPathUpdatePos!.latitude,
+      _lastPathUpdatePos!.longitude,
+      currentPos.latitude,
+      currentPos.longitude,
+    );
+    // Only fetch new route if driver moved > 50 meters
+    if (distance > 50) {
+      _lastPathUpdatePos = currentPos;
+      _updateLiveApproachPath(currentPos);
+    }
+  }
+
+  Future<void> _updateLiveApproachPath(LatLng driverLocation) async {
+    PolylineResult result = await _polylineHelper.getRouteBetweenCoordinates(
+      request: PolylineRequest(
+        origin: PointLatLng(driverLocation.latitude, driverLocation.longitude),
+        destination: PointLatLng(
+            widget.rideData['pickup_lat'], widget.rideData['pickup_lng']),
+        mode: TravelMode.driving,
+      ),
+    );
+
+    if (result.points.isNotEmpty && mounted) {
+      List<LatLng> approachPoints =
+          result.points.map((p) => LatLng(p.latitude, p.longitude)).toList();
+      setState(() {
+        _trackPolylines
+            .removeWhere((p) => p.polylineId.value == "approach_live");
+        _trackPolylines.add(Polyline(
+            polylineId: const PolylineId("approach_live"),
+            points: approachPoints,
+            color:
+                Colors.grey, // Grey path indicates "Driver approaching pickup"
+            width: 5));
+      });
+    }
+  }
+
+  // --- Assets ---
   Future<void> _initAssets() async {
     await _renderCarIcon();
     await _fetchInitialTripRoute();
   }
 
-  // ... [Keep _renderCarIcon and _fetchInitialTripRoute same as before] ...
   Future<void> _renderCarIcon() async {
     final ui.PictureRecorder recorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(recorder);
     const double iconSize = 110.0;
-
     TextPainter painter = TextPainter(textDirection: TextDirection.ltr);
     painter.text = TextSpan(
       text: String.fromCharCode(Icons.directions_car_filled.codePoint),
@@ -72,12 +148,10 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
     );
     painter.layout();
     painter.paint(canvas, const Offset(0, 0));
-
     final img = await recorder
         .endRecording()
         .toImage(iconSize.toInt(), iconSize.toInt());
     final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
-
     if (mounted && byteData != null) {
       setState(() => _customCarIcon =
           BitmapDescriptor.fromBytes(byteData.buffer.asUint8List()));
@@ -94,166 +168,17 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
         mode: TravelMode.driving,
       ),
     );
-
-    if (result.points.isNotEmpty) {
+    if (result.points.isNotEmpty && mounted) {
       List<LatLng> tripPoints =
           result.points.map((p) => LatLng(p.latitude, p.longitude)).toList();
-
-      // CRITICAL FIX: Add 'if (mounted)' before every setState in async functions
-      if (mounted) {
-        setState(() {
-          _trackPolylines.add(Polyline(
-              polylineId: const PolylineId("trip_main"),
-              points: tripPoints,
-              color: Colors.blueAccent,
-              width: 6));
-        });
-      }
-    }
-  }
-  // ... ---------------------------------------------------------------- ...
-
-  // --- 🚗 DUMMY SIMULATION LOGIC START ---
-
-  // Helper: Calculate bearing (rotation) between two points
-  double _calculateBearing(LatLng start, LatLng end) {
-    double lat1 = start.latitude * (math.pi / 180.0);
-    double lon1 = start.longitude * (math.pi / 180.0);
-    double lat2 = end.latitude * (math.pi / 180.0);
-    double lon2 = end.longitude * (math.pi / 180.0);
-
-    double dLon = lon2 - lon1;
-    double y = math.sin(dLon) * math.cos(lat2);
-    double x = math.cos(lat1) * math.sin(lat2) -
-        math.sin(lat1) * math.cos(lat2) * math.cos(dLon);
-    double brng = math.atan2(y, x);
-    return (brng * (180.0 / math.pi) + 360.0) % 360.0;
-  }
-
-  void _startDummyDrive(LatLng currentDriverPos) async {
-    if (_demoTimer != null && _demoTimer!.isActive) return;
-
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text("🚗 Simulation Started!")));
-
-    // 1. Fetch Leg 1: Driver -> Pickup
-    PolylineResult leg1 = await _polylineHelper.getRouteBetweenCoordinates(
-      request: PolylineRequest(
-        origin:
-            PointLatLng(currentDriverPos.latitude, currentDriverPos.longitude),
-        destination: PointLatLng(
-            widget.rideData['pickup_lat'], widget.rideData['pickup_lng']),
-        mode: TravelMode.driving,
-      ),
-    );
-
-    // 2. Fetch Leg 2: Pickup -> Drop
-    PolylineResult leg2 = await _polylineHelper.getRouteBetweenCoordinates(
-      request: PolylineRequest(
-        origin: PointLatLng(
-            widget.rideData['pickup_lat'], widget.rideData['pickup_lng']),
-        destination: PointLatLng(
-            widget.rideData['drop_lat'], widget.rideData['drop_lng']),
-        mode: TravelMode.driving,
-      ),
-    );
-
-    if (leg1.points.isEmpty && leg2.points.isEmpty) return;
-
-    List<LatLng> driverToPickup =
-        leg1.points.map((p) => LatLng(p.latitude, p.longitude)).toList();
-    List<LatLng> pickupToDrop =
-        leg2.points.map((p) => LatLng(p.latitude, p.longitude)).toList();
-
-    int index = 0;
-    bool reachedPickup = false;
-
-    setState(() => _trackPolylines.clear());
-
-    _demoTimer = Timer.periodic(const Duration(milliseconds: 1000), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-
-      List<LatLng> currentActivePath =
-          reachedPickup ? pickupToDrop : driverToPickup;
-
-      if (index >= currentActivePath.length - 1) {
-        if (!reachedPickup) {
-          reachedPickup = true;
-          index = 0;
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("📍 Driver reached Pickup!")));
-        } else {
-          timer.cancel();
-          setState(() {
-            _simulatedPos = null;
-            _simulatedHeading = null;
-            _trackPolylines.clear();
-          });
-          ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text("🏁 Ride Completed")));
-          return;
-        }
-      }
-
-      LatLng start = currentActivePath[index];
-      LatLng end = currentActivePath[index + 1];
-
       setState(() {
-        _simulatedPos = start;
-        _simulatedHeading = _calculateBearing(start, end);
-
-        // --- DYNAMIC PATH SHORTENING ---
-        // We only draw from the current 'index' to the end of the list
-        // This makes the path "disappear" behind the car
-        _trackPolylines = {
-          Polyline(
-            polylineId: PolylineId(
-                reachedPickup ? "trip_to_drop" : "approach_to_pickup"),
-            points: currentActivePath.sublist(index), // This is the secret
-            color: Colors.blueAccent,
-            width: 6,
-            jointType: JointType.round,
-          )
-        };
-      });
-
-      _moveCameraToPosition(start);
-      index++;
-    });
-  }
-  // --- 🚗 DUMMY SIMULATION LOGIC END ---
-
-  Future<void> _updateLiveApproachPath(LatLng driverLocation) async {
-    PolylineResult result = await _polylineHelper.getRouteBetweenCoordinates(
-      request: PolylineRequest(
-        origin: PointLatLng(driverLocation.latitude, driverLocation.longitude),
-        destination: PointLatLng(
-            widget.rideData['pickup_lat'], widget.rideData['pickup_lng']),
-        mode: TravelMode.driving,
-      ),
-    );
-    if (result.points.isNotEmpty && mounted) {
-      List<LatLng> approachPoints =
-          result.points.map((p) => LatLng(p.latitude, p.longitude)).toList();
-      setState(() {
-        _trackPolylines
-            .removeWhere((p) => p.polylineId.value == "approach_live");
         _trackPolylines.add(Polyline(
-            polylineId: const PolylineId("approach_live"),
-            points: approachPoints,
-            color: Colors.grey.withOpacity(0.7),
-            width: 5));
+            polylineId: const PolylineId("trip_main"),
+            points: tripPoints,
+            color: Colors.blueAccent, // Blue path is the ride itself
+            width: 6));
       });
     }
-  }
-
-  Future<void> _moveCameraToPosition(LatLng pos) async {
-    final controller = await _mapCompleter.future;
-    controller.animateCamera(CameraUpdate.newCameraPosition(
-        CameraPosition(target: pos, zoom: 16, tilt: 40)));
   }
 
   Set<Marker> _buildMapMarkers(LatLng driver, double heading) {
@@ -279,15 +204,6 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
     };
   }
 
-  // Fuzzy Finder (Keep this from previous step)
-  dynamic _fuzzyGet(Map<String, dynamic> data, String targetKey) {
-    if (data.containsKey(targetKey)) return data[targetKey];
-    for (String key in data.keys) {
-      if (key.trim() == targetKey) return data[key];
-    }
-    return null;
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -300,43 +216,28 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
                 .doc(widget.rideId)
                 .snapshots(),
             builder: (context, snapshot) {
-              if (!snapshot.hasData || !snapshot.data!.exists) {
-                return const Center(child: CircularProgressIndicator());
+              // 1. Initial / Fallback Data (Firestore)
+              double driverLat = widget.rideData['pickup_lat'];
+              double driverLng = widget.rideData['pickup_lng'];
+              double driverHeading = 0.0;
+
+              if (snapshot.hasData && snapshot.data!.exists) {
+                final remoteData =
+                    snapshot.data!.data() as Map<String, dynamic>;
+                if (remoteData['driver_lat'] != null) {
+                  driverLat = (remoteData['driver_lat'] as num).toDouble();
+                  driverLng = (remoteData['driver_lng'] as num).toDouble();
+                  driverHeading =
+                      (remoteData['driver_heading'] as num).toDouble();
+                }
               }
 
-              final remoteData = snapshot.data!.data() as Map<String, dynamic>;
-
-              final rawLat = _fuzzyGet(remoteData, 'driver_lat');
-              final rawLng = _fuzzyGet(remoteData, 'driver_lng');
-              final rawHeading = _fuzzyGet(remoteData, 'driver_heading');
-
-              // Firestore data (Fallbacks)
-              final double fsLat = (rawLat is num
-                      ? rawLat.toDouble()
-                      : double.tryParse(rawLat.toString())) ??
-                  widget.rideData['pickup_lat'] - 0.001;
-              final double fsLng = (rawLng is num
-                      ? rawLng.toDouble()
-                      : double.tryParse(rawLng.toString())) ??
-                  widget.rideData['pickup_lng'] - 0.001;
-              final LatLng fsPos = LatLng(fsLat, fsLng);
-              final double fsHeading = (rawHeading is num
-                      ? rawHeading.toDouble()
-                      : double.tryParse(rawHeading?.toString() ?? "0")) ??
-                  0.0;
-
-              // 🔥 OVERRIDE: If simulation is running, use _simulatedPos, otherwise use Firestore
-              final LatLng effectivePos = _simulatedPos ?? fsPos;
-              final double effectiveHeading = _simulatedHeading ?? fsHeading;
-
-              // Only auto-update camera if NOT simulating (Simulation handles its own camera)
-              if (_simulatedPos == null && _previousPos != effectivePos) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _previousPos = effectivePos;
-                  _updateLiveApproachPath(effectivePos);
-                  _moveCameraToPosition(effectivePos);
-                });
-              }
+              // 2. Determine Effective Location
+              // PRIORITY: Live Socket > Firestore > Static
+              final LatLng effectivePos =
+                  _liveSocketPos ?? LatLng(driverLat, driverLng);
+              final double effectiveHeading =
+                  _liveSocketPos != null ? _liveSocketHeading : driverHeading;
 
               return GoogleMap(
                 initialCameraPosition:
@@ -348,6 +249,8 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
                 },
                 myLocationEnabled: false,
                 zoomControlsEnabled: false,
+                // Disable rotate gestures to keep heading visualization clear
+                rotateGesturesEnabled: false,
               );
             },
           ),
@@ -361,22 +264,10 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
           ),
         ],
       ),
-
-      // 🕹️ TEST BUTTON
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.white,
-        onPressed: () {
-          // Start simulation from current pickup or a known default
-          // For robustness, we just assume driver starts somewhat near pickup or just use pickup for demo
-          _startDummyDrive(LatLng(widget.rideData['pickup_lat'] - 0.001,
-              widget.rideData['pickup_lng'] - 0.001));
-        },
-        child: const Icon(Icons.play_arrow, color: Colors.black),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.startTop,
     );
   }
 
+  // --- UI Components ---
   Widget _buildOtpDisplay() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -395,6 +286,7 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen> {
   }
 
   Widget _buildInformationPanel() {
+    // ... [Same as your previous code] ...
     return Padding(
       padding: const EdgeInsets.all(20),
       child: Column(children: [

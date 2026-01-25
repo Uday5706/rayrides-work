@@ -6,6 +6,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:rayride/services/driver_socket_service.dart'; // Import your socket service
 
 class DriverMapTrackingScreen extends StatefulWidget {
   final Map<String, dynamic> rideData;
@@ -20,20 +21,33 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen> {
   GoogleMapController? _mapController;
   BitmapDescriptor? _carIcon;
   Set<Marker> _markers = {};
-  Set<Polyline> _polylines = {}; // To store the two routes
+  Set<Polyline> _polylines = {};
   LatLng? _driverLatLng;
 
-  // Replace with your actual API key from dotenv or a constant
+  // 1. Initialize Socket Service
+  final DriverSocketService _socketService = DriverSocketService();
+
   final String googleApiKey = dotenv.env['GOOGLE_MAPS_API_KEY'] ?? "";
 
   @override
   void initState() {
     super.initState();
     _loadMarkerIcon();
+
+    // 2. Connect to the socket room immediately
+    // ensure 'rideId' exists in your rideData map
+    _socketService.connect(widget.rideData['rideId']);
+
     _startLocationTracking();
   }
 
-  // Task 1: Convert Material Icon to BitmapDescriptor
+  @override
+  void dispose() {
+    // 3. Clean up connection when leaving screen
+    _socketService.disconnect();
+    super.dispose();
+  }
+
   Future<void> _loadMarkerIcon() async {
     final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(pictureRecorder);
@@ -45,7 +59,7 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen> {
       style: TextStyle(
         fontSize: size,
         fontFamily: Icons.directions_car_filled.fontFamily,
-        color: Colors.blue, // Your preferred car color
+        color: Colors.blue,
       ),
     );
     textPainter.layout();
@@ -60,8 +74,6 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen> {
       _carIcon = BitmapDescriptor.fromBytes(data!.buffer.asUint8List());
     });
   }
-
-  // Inside _DriverMapTrackingScreenState
 
   void _showOtpDialog() {
     final TextEditingController otpController = TextEditingController();
@@ -93,25 +105,21 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen> {
   }
 
   Future<void> _verifyOtp(String enteredOtp) async {
+    // Check type consistency (String vs Int)
     if (enteredOtp == widget.rideData['otp'].toString()) {
       try {
-        // 1. Update Firestore first
         await FirebaseFirestore.instance
             .collection('rides')
             .doc(widget.rideData['id'])
             .update({'status': 'in_progress'});
 
-        // 2. Safety check: Is the widget still active?
         if (!mounted) return;
 
-        // 3. Close the Dialog specifically
-        // Use the local context of the dialog if available
         Navigator.of(context, rootNavigator: true).pop();
 
         _showSnackBar("Trip Started! Drive safely.", Colors.green);
 
         setState(() {
-          // Remove the red polyline now that pickup is done
           _polylines
               .removeWhere((p) => p.polylineId.value == "driver_to_pickup");
         });
@@ -126,16 +134,13 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen> {
   }
 
   void _showSnackBar(String message, Color color) {
-    // Final safety check to prevent the "Unhandled Exception"
     if (!mounted) return;
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: color),
     );
   }
 
   void _startLocationTracking() async {
-    // 1. Get an immediate position so the map loads instantly
     try {
       Position initialPosition = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high);
@@ -150,29 +155,27 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen> {
       debugPrint("Could not get initial position: $e");
     }
 
-    // 2. Continue with the stream for real-time updates
     Geolocator.getPositionStream(
-      // Change this in _startLocationTracking
       locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high, distanceFilter: 5),
     ).listen((Position position) {
-      if (!mounted) return; // Always check mounted in listeners
+      if (!mounted) return;
 
       LatLng newPos = LatLng(position.latitude, position.longitude);
 
-      FirebaseFirestore.instance
-          .collection('rides')
-          .doc(widget.rideData['id'])
-          .update({
-        'driver_lat': position.latitude,
-        'driver_lng': position.longitude,
-        'driver_heading': position.heading,
-      });
+      // --- CRITICAL CHANGE: Socket Emit instead of Firestore Write ---
+      _socketService.sendLocation(
+        position.latitude,
+        position.longitude,
+        position.heading,
+        widget.rideData['rideId'], // Ensure this matches the joinRide ID
+      );
+      // -------------------------------------------------------------
 
       setState(() {
         _driverLatLng = newPos;
         _updateMarkers(position);
-        // Optimized: Only redraw routes if significant movement occurs
+        // Only redraw routes if really necessary (Optional optimization)
         _drawRoutes(newPos);
       });
 
@@ -180,7 +183,6 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen> {
     });
   }
 
-  // Task 2: Paint the two routes
   Future<void> _drawRoutes(LatLng driverPos) async {
     PolylinePoints polylinePoints = PolylinePoints(apiKey: googleApiKey);
     LatLng pickup =
@@ -195,7 +197,6 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen> {
         destination: PointLatLng(pickup.latitude, pickup.longitude),
         mode: TravelMode.driving,
       ),
-      // googleApiKey: googleApiKey,
     );
 
     // 2. Pickup to Drop (BLUE)
@@ -205,29 +206,30 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen> {
         destination: PointLatLng(drop.latitude, drop.longitude),
         mode: TravelMode.driving,
       ),
-      // googleApiKey: googleApiKey,
     );
 
-    setState(() {
-      _polylines = {
-        Polyline(
-          polylineId: const PolylineId("to_pickup"),
-          points: toPickup.points
-              .map((p) => LatLng(p.latitude, p.longitude))
-              .toList(),
-          color: Colors.red, // RED for pickup approach
-          width: 5,
-        ),
-        Polyline(
-          polylineId: const PolylineId("to_drop"),
-          points: toDrop.points
-              .map((p) => LatLng(p.latitude, p.longitude))
-              .toList(),
-          color: Colors.blue, // BLUE for the actual trip
-          width: 5,
-        ),
-      };
-    });
+    if (mounted) {
+      setState(() {
+        _polylines = {
+          Polyline(
+            polylineId: const PolylineId("to_pickup"),
+            points: toPickup.points
+                .map((p) => LatLng(p.latitude, p.longitude))
+                .toList(),
+            color: Colors.red,
+            width: 5,
+          ),
+          Polyline(
+            polylineId: const PolylineId("to_drop"),
+            points: toDrop.points
+                .map((p) => LatLng(p.latitude, p.longitude))
+                .toList(),
+            color: Colors.blue,
+            width: 5,
+          ),
+        };
+      });
+    }
   }
 
   void _updateMarkers(Position currentPos) {
@@ -269,7 +271,6 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen> {
                   polylines: _polylines,
                   onMapCreated: (controller) => _mapController = controller,
                 ),
-                // Optional: Sliding panel or overlay for ride details
               ],
             ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
