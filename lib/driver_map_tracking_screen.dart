@@ -356,8 +356,8 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showOtpDialog,
-        label: const Text("START TRIP"),
-        icon: const Icon(Icons.play_arrow),
+        label: const Text("START TRIP", style: TextStyle(color: Colors.white)),
+        icon: const Icon(Icons.play_arrow, color: Colors.white),
         backgroundColor: Colors.green,
       ),
     );
