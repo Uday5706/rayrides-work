@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:persistent_bottom_nav_bar/persistent_bottom_nav_bar.dart';
 import 'package:tcard/tcard.dart';
 
 import 'driver_map_tracking_screen.dart';
@@ -58,53 +60,68 @@ class _fareOfferScreenState extends State<fareOfferScreen> {
   // Inside _fareOfferScreenState
   Future<void> acceptRide(Map<String, dynamic> offer) async {
     try {
-      // 1. Check if location services are enabled
+      // 🔐 Get current logged-in driver
+      final user = FirebaseAuth.instance.currentUser;
+
+      if (user == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("User not logged in")),
+        );
+        return;
+      }
+
+      final driverUid = user.uid;
+
+      // 1️⃣ Location Permission Checks
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         return Future.error('Location services are disabled.');
       }
 
-      // 2. Check current permission status
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
-        // 3. Request permission if it was previously denied
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
-          // Permissions are denied, next time you could try requesting permissions again
           return Future.error('Location permissions are denied');
         }
       }
 
-      // 4. Handle permanent denial (User must go to settings manually)
       if (permission == LocationPermission.deniedForever) {
-        return Future.error(
-            'Location permissions are permanently denied, we cannot request permissions.');
+        return Future.error('Location permissions are permanently denied.');
       }
 
-      // 5. If permissions are granted, proceed with fetching position
+      // 2️⃣ Get Current Location
       Position position = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high);
 
+      // 3️⃣ Update Ride in Firestore
       await FirebaseFirestore.instance
           .collection('rides')
           .doc(offer['id'])
           .update({
         'status': 'accepted',
-        'driver_id': 'driver_demo_123',
-        'driver_lat': position.latitude, // Initialize coordinates
+        'driver_id': driverUid, // ✅ REAL UID
+        'driver_lat': position.latitude,
         'driver_lng': position.longitude,
         'driver_heading': position.heading,
+        'accepted_at': FieldValue.serverTimestamp(),
       });
 
       if (!mounted) return;
-      Navigator.push(
+
+      // 4️⃣ Navigate to Driver Map
+      PersistentNavBarNavigator.pushNewScreen(
         context,
-        MaterialPageRoute(
-          builder: (context) => DriverMapTrackingScreen(rideData: offer),
-        ),
+        screen: DriverMapTrackingScreen(rideData: offer),
+        withNavBar: false, // hides bottom nav during ride
+        pageTransitionAnimation: PageTransitionAnimation.cupertino,
       );
     } catch (e) {
       debugPrint("Accept error: $e");
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error accepting ride: $e")),
+      );
     }
   }
 
