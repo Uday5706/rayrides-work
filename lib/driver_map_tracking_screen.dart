@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
@@ -30,19 +31,16 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
   final String googleApiKey = dotenv.env['GOOGLE_MAPS_API_KEY'] ?? "";
   LatLng? _lastRouteUpdatePos;
 
-  // --- SAFE VARIABLES ---
-  late String _rideId;
-  late LatLng _pickupPos;
-  late LatLng _dropPos;
+  late String _tripId;
 
-  // --- LOGIC VARIABLES ---
-  StreamSubscription<DocumentSnapshot>? _rideStatusSubscription;
-  String _rideStatus = "accepted";
+  List<Map<String, dynamic>> _passengers = [];
+  StreamSubscription<QuerySnapshot>? _passengersSubscription;
   double _carbonSaved = 0.0;
   late LatLng _driverStartPos;
   bool _isStartPosSet = false;
 
-  // --- ANIMATION VARIABLES ---
+  final Map<String, DateTime> _passengerArrivalTimes = {};
+
   late AnimationController _animController;
   LatLng _currentVisualPos = const LatLng(0, 0);
   double _currentVisualHeading = 0.0;
@@ -55,28 +53,17 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
   void initState() {
     super.initState();
 
-    // 1. SAFE ID EXTRACTION
-    _rideId = widget.rideData['rideId'] ?? widget.rideData['id'] ?? "";
+    _tripId = widget.rideData['tripId'] ?? widget.rideData['id'] ?? "";
 
-    // 2. SAFE COORDINATE EXTRACTION (Fixes 'Null is not subtype of double')
-    _pickupPos = LatLng(
-      _parseDouble(widget.rideData['pickup_lat']),
-      _parseDouble(widget.rideData['pickup_lng']),
-    );
-    _dropPos = LatLng(
-      _parseDouble(widget.rideData['drop_lat']),
-      _parseDouble(widget.rideData['drop_lng']),
-    );
-
-    if (_rideId.isEmpty) {
-      debugPrint("❌ ERROR: Ride ID is missing!");
+    if (_tripId.isEmpty) {
+      debugPrint("❌ ERROR: Trip ID is missing!");
     }
 
     _loadMarkerIcon();
 
-    if (_rideId.isNotEmpty) {
-      _socketService.connect(_rideId);
-      _listenForRideStatusChanges();
+    if (_tripId.isNotEmpty) {
+      _socketService.connect(_tripId);
+      _listenForPassengers();
     }
 
     _animController = AnimationController(
@@ -99,7 +86,6 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
     _startLocationTracking();
   }
 
-  // --- HELPER: Safely convert any value to double ---
   double _parseDouble(dynamic value) {
     if (value == null) return 0.0;
     if (value is double) return value;
@@ -110,21 +96,35 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
 
   @override
   void dispose() {
-    _rideStatusSubscription?.cancel();
+    _passengersSubscription?.cancel();
     _socketService.disconnect();
     _animController.dispose();
     super.dispose();
   }
 
-  Future<void> _saveCarbonEmission() async {
-    try {
-      await FirebaseFirestore.instance.collection('rides').doc(_rideId).update({
-        'carbon_saved_kg': _carbonSaved,
-        'completed_at': FieldValue.serverTimestamp(),
+  void _listenForPassengers() {
+    _passengersSubscription = FirebaseFirestore.instance
+        .collection('shared_trips')
+        .doc(_tripId)
+        .collection('passengers')
+        .snapshots()
+        .listen((snapshot) {
+      if (!mounted) return;
+
+      List<Map<String, dynamic>> updatedPassengers = [];
+      for (var doc in snapshot.docs) {
+        var data = doc.data();
+        data['passenger_id'] = doc.id;
+        updatedPassengers.add(data);
+      }
+
+      setState(() {
+        _passengers = updatedPassengers;
       });
-    } catch (e) {
-      debugPrint("Carbon save error: $e");
-    }
+
+      _updateMarkers();
+      _throttledRouteUpdate(_currentVisualPos, force: true);
+    });
   }
 
   void _startLocationTracking() async {
@@ -144,7 +144,7 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
           _newPos = _currentVisualPos;
 
           _updateMarkers();
-          _updateRoutesAndCarbon(_currentVisualPos);
+          _throttledRouteUpdate(_currentVisualPos, force: true);
         });
       }
     } catch (e) {
@@ -155,22 +155,46 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
       locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high, distanceFilter: 5),
     ).listen((Position position) {
-      if (!mounted) return;
-      if (_rideId.isEmpty) return;
+      if (!mounted || _tripId.isEmpty) return;
 
       LatLng newPos = LatLng(position.latitude, position.longitude);
 
-      _socketService.sendLocation(
-        position.latitude,
-        position.longitude,
-        position.heading,
-        _rideId,
-      );
+      FirebaseFirestore.instance
+          .collection('shared_trips')
+          .doc(_tripId)
+          .update({
+        'current_lat': position.latitude,
+        'current_lng': position.longitude,
+        'current_heading': position.heading,
+      });
 
       _animateCar(newPos, position.heading);
       _mapController?.animateCamera(CameraUpdate.newLatLng(newPos));
       _throttledRouteUpdate(newPos);
+      _calculateCarbon(newPos);
+      _checkPassengerArrivals(newPos);
     });
+  }
+
+  void _checkPassengerArrivals(LatLng driverPos) {
+    for (var p in _passengers) {
+      if (p['status'] == 'awaiting_pickup') {
+        double dist = Geolocator.distanceBetween(
+            driverPos.latitude,
+            driverPos.longitude,
+            _parseDouble(p['pickup_lat']),
+            _parseDouble(p['pickup_lng']));
+
+        if (dist <= 100 &&
+            !_passengerArrivalTimes.containsKey(p['passenger_id'])) {
+          _passengerArrivalTimes[p['passenger_id']] = DateTime.now();
+
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text("Arrived at pickup. Wait timer started."),
+              backgroundColor: Colors.orange));
+        }
+      }
+    }
   }
 
   void _animateCar(LatLng destPos, double destHeading) {
@@ -180,20 +204,22 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
     _newHeading = destHeading;
 
     if ((_newHeading - _oldHeading).abs() > 180) {
-      if (_newHeading > _oldHeading)
+      if (_newHeading > _oldHeading) {
         _oldHeading += 360;
-      else
+      } else {
         _newHeading += 360;
+      }
     }
     _animController.forward(from: 0.0);
   }
 
-  void _throttledRouteUpdate(LatLng currentPos) {
-    if (_lastRouteUpdatePos == null) {
+  void _throttledRouteUpdate(LatLng currentPos, {bool force = false}) {
+    if (_lastRouteUpdatePos == null || force) {
       _lastRouteUpdatePos = currentPos;
-      _updateRoutesAndCarbon(currentPos);
+      _updateDynamicRoute(currentPos);
       return;
     }
+
     double distance = Geolocator.distanceBetween(
       _lastRouteUpdatePos!.latitude,
       _lastRouteUpdatePos!.longitude,
@@ -201,170 +227,74 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
       currentPos.longitude,
     );
 
-    _calculateCarbon(currentPos);
-
     if (distance > 50) {
       _lastRouteUpdatePos = currentPos;
-      _updateRoutesAndCarbon(currentPos);
+      _updateDynamicRoute(currentPos);
     }
   }
 
-  void _calculateCarbon(LatLng currentPos) {
-    if (!_isStartPosSet) return;
+  Future<void> _updateDynamicRoute(LatLng driverPos) async {
+    LatLng? nextTarget;
+    double shortestDistance = double.infinity;
+    Color routeColor = Colors.blue;
 
-    double totalDist = 0.0;
-    if (_rideStatus == "accepted") {
-      totalDist = Geolocator.distanceBetween(
-        _driverStartPos.latitude,
-        _driverStartPos.longitude,
-        currentPos.latitude,
-        currentPos.longitude,
-      );
-    } else {
-      double approach = Geolocator.distanceBetween(
-        _driverStartPos.latitude,
-        _driverStartPos.longitude,
-        _pickupPos.latitude,
-        _pickupPos.longitude,
-      );
-      double trip = Geolocator.distanceBetween(
-        _pickupPos.latitude,
-        _pickupPos.longitude,
-        currentPos.latitude,
-        currentPos.longitude,
-      );
-      totalDist = approach + trip;
-    }
-
-    if (mounted) {
-      setState(() {
-        _carbonSaved = (totalDist / 1000) * 0.4;
-      });
-    }
-  }
-
-  void _listenForRideStatusChanges() {
-    if (_rideId.isEmpty) return;
-
-    _rideStatusSubscription = FirebaseFirestore.instance
-        .collection('rides')
-        .doc(_rideId)
-        .snapshots()
-        .listen((snapshot) async {
-      if (!snapshot.exists || !mounted) return;
-
-      final data = snapshot.data() as Map<String, dynamic>;
-      final status = data['status'];
-
-      /// 🚨 RIDE CANCELLED BEFORE START
-      if (status == 'cancelled' && _rideStatus == "accepted") {
-        await _showCancelledScreen();
-        Navigator.pop(context);
+    for (var p in _passengers) {
+      if (p['status'] == 'awaiting_pickup') {
+        double dist = Geolocator.distanceBetween(
+            driverPos.latitude,
+            driverPos.longitude,
+            _parseDouble(p['pickup_lat']),
+            _parseDouble(p['pickup_lng']));
+        if (dist < shortestDistance) {
+          shortestDistance = dist;
+          nextTarget = LatLng(
+              _parseDouble(p['pickup_lat']), _parseDouble(p['pickup_lng']));
+          routeColor = Colors.redAccent;
+        }
+      } else if (p['status'] == 'in_transit') {
+        double dist = Geolocator.distanceBetween(
+            driverPos.latitude,
+            driverPos.longitude,
+            _parseDouble(p['drop_lat']),
+            _parseDouble(p['drop_lng']));
+        if (dist < shortestDistance) {
+          shortestDistance = dist;
+          nextTarget =
+              LatLng(_parseDouble(p['drop_lat']), _parseDouble(p['drop_lng']));
+          routeColor = Colors.blueAccent;
+        }
       }
+    }
 
-      /// 🏁 RIDE ENDED
-      if (status == 'ended') {
-        await _saveCarbonEmission();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text("Ride Completed Successfully"),
-              backgroundColor: Colors.blue),
-        );
-        mainNavController.index = 1;
-      }
-    });
-  }
-
-  Future<void> _updateRoutesAndCarbon(LatLng driverPos) async {
-    // If coordinates are invalid (0.0), don't fetch route
-    if (_pickupPos.latitude == 0 || _dropPos.latitude == 0) return;
+    if (nextTarget == null) return;
 
     PolylinePoints polylinePoints = PolylinePoints(apiKey: googleApiKey);
-    Set<Polyline> newPolylines = {};
+    PolylineResult result = await polylinePoints.getRouteBetweenCoordinates(
+      request: PolylineRequest(
+        origin: PointLatLng(driverPos.latitude, driverPos.longitude),
+        destination: PointLatLng(nextTarget.latitude, nextTarget.longitude),
+        mode: TravelMode.driving,
+      ),
+    );
 
-    if (_rideStatus == "accepted") {
-      // 1. Red Line (Shrinking): Driver -> Pickup
-      PolylineResult toPickup = await polylinePoints.getRouteBetweenCoordinates(
-        request: PolylineRequest(
-          origin: PointLatLng(driverPos.latitude, driverPos.longitude),
-          destination: PointLatLng(_pickupPos.latitude, _pickupPos.longitude),
-          mode: TravelMode.driving,
-        ),
-      );
-
-      // 2. Blue Line (Static): Pickup -> Drop
-      PolylineResult toDrop = await polylinePoints.getRouteBetweenCoordinates(
-        request: PolylineRequest(
-          origin: PointLatLng(_pickupPos.latitude, _pickupPos.longitude),
-          destination: PointLatLng(_dropPos.latitude, _dropPos.longitude),
-          mode: TravelMode.driving,
-        ),
-      );
-
-      if (toPickup.points.isNotEmpty) {
-        newPolylines.add(Polyline(
-          polylineId: const PolylineId("to_pickup"),
-          points: toPickup.points
-              .map((p) => LatLng(p.latitude, p.longitude))
-              .toList(),
-          color: Colors.red,
-          width: 5,
-        ));
-      }
-      if (toDrop.points.isNotEmpty) {
-        newPolylines.add(Polyline(
-          polylineId: const PolylineId("to_drop"),
-          points: toDrop.points
-              .map((p) => LatLng(p.latitude, p.longitude))
-              .toList(),
-          color: Colors.blue,
-          width: 5,
-        ));
-      }
-    } else if (_rideStatus == "in_progress") {
-      // 1. Blue Line (Shrinking): Driver -> Drop
-      PolylineResult toDrop = await polylinePoints.getRouteBetweenCoordinates(
-        request: PolylineRequest(
-          origin: PointLatLng(driverPos.latitude, driverPos.longitude),
-          destination: PointLatLng(_dropPos.latitude, _dropPos.longitude),
-          mode: TravelMode.driving,
-        ),
-      );
-
-      if (toDrop.points.isNotEmpty) {
-        newPolylines.add(Polyline(
-          polylineId: const PolylineId("to_drop"),
-          points: toDrop.points
-              .map((p) => LatLng(p.latitude, p.longitude))
-              .toList(),
-          color: Colors.blue,
-          width: 5,
-        ));
-      }
-    }
-
-    if (mounted) {
+    if (result.points.isNotEmpty && mounted) {
       setState(() {
-        _polylines = newPolylines;
+        _polylines = {
+          Polyline(
+            polylineId: const PolylineId("dynamic_route"),
+            points: result.points
+                .map((p) => LatLng(p.latitude, p.longitude))
+                .toList(),
+            color: routeColor,
+            width: 6,
+          )
+        };
       });
     }
   }
 
   void _updateMarkers() {
-    // Only show markers if they have valid coordinates
-    if (_pickupPos.latitude == 0 || _dropPos.latitude == 0) return;
-
-    _markers = {
-      Marker(
-        markerId: const MarkerId("pickup"),
-        position: _pickupPos,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-      ),
-      Marker(
-        markerId: const MarkerId("drop"),
-        position: _dropPos,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-      ),
+    Set<Marker> newMarkers = {
       Marker(
         markerId: const MarkerId("driver"),
         position: _currentVisualPos,
@@ -374,6 +304,46 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
         flat: true,
       ),
     };
+
+    for (var p in _passengers) {
+      if (p['status'] == 'awaiting_pickup') {
+        newMarkers.add(Marker(
+          markerId: MarkerId("pickup_${p['passenger_id']}"),
+          position: LatLng(
+              _parseDouble(p['pickup_lat']), _parseDouble(p['pickup_lng'])),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          infoWindow: InfoWindow(title: "Pickup: ${p['seats_booked']} seats"),
+        ));
+      } else if (p['status'] == 'in_transit') {
+        newMarkers.add(Marker(
+          markerId: MarkerId("drop_${p['passenger_id']}"),
+          position:
+              LatLng(_parseDouble(p['drop_lat']), _parseDouble(p['drop_lng'])),
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          infoWindow: InfoWindow(title: "Drop: ${p['seats_booked']} seats"),
+        ));
+      }
+    }
+
+    setState(() {
+      _markers = newMarkers;
+    });
+  }
+
+  void _calculateCarbon(LatLng currentPos) {
+    if (!_isStartPosSet) return;
+    double totalDist = Geolocator.distanceBetween(
+      _driverStartPos.latitude,
+      _driverStartPos.longitude,
+      currentPos.latitude,
+      currentPos.longitude,
+    );
+    if (mounted) {
+      setState(() {
+        _carbonSaved = (totalDist / 1000) * 0.4;
+      });
+    }
   }
 
   Future<void> _loadMarkerIcon() async {
@@ -398,71 +368,372 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
         _carIcon = BitmapDescriptor.fromBytes(data!.buffer.asUint8List()));
   }
 
-  void _showOtpDialog() {
+  void _showOtpBottomSheet(
+      String passengerId, String expectedOtp, double baseFare) {
     final TextEditingController otpController = TextEditingController();
-    showDialog(
+
+    showModalBottomSheet(
       context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text("Enter Start OTP"),
-        content: TextField(
-          controller: otpController,
-          keyboardType: TextInputType.number,
-          maxLength: 4,
-          decoration: const InputDecoration(hintText: "Enter 4-digit code"),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () => _verifyOtp(otpController.text),
-            child: const Text("Verify & Start"),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+            left: 20,
+            right: 20,
+            top: 30,
           ),
-        ],
-      ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("Enter Rider OTP",
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              TextField(
+                controller: otpController,
+                keyboardType: TextInputType.number,
+                maxLength: 4,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 24,
+                    letterSpacing: 12,
+                    fontWeight: FontWeight.bold),
+                decoration: InputDecoration(
+                  counterText: "",
+                  filled: true,
+                  fillColor: Colors.grey[200],
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide.none),
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 55,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: () {
+                    _verifyPassengerOtp(passengerId, baseFare);
+                    Navigator.pop(context);
+                  },
+                  child: const Text("VERIFY & PICKUP",
+                      style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold)),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        );
+      },
     );
   }
 
-  Future<void> _verifyOtp(String enteredOtp) async {
-    if (enteredOtp == widget.rideData['otp'].toString()) {
-      try {
-        await FirebaseFirestore.instance
-            .collection('rides')
-            .doc(_rideId)
-            .update({'status': 'in_progress'});
+  // 🟢 TEACHING CONCEPT: Atomic Acceptance
+  // We use a transaction here. If two riders book the last seat at the exact same
+  // millisecond, the transaction prevents double-booking.
+  Future<void> _acceptPassenger(Map<String, dynamic> p) async {
+    try {
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        DocumentReference tripRef =
+            FirebaseFirestore.instance.collection('shared_trips').doc(_tripId);
+        DocumentReference passRef =
+            tripRef.collection('passengers').doc(p['passenger_id']);
 
-        if (!mounted) return;
-        Navigator.pop(context);
+        DocumentSnapshot tripDoc = await transaction.get(tripRef);
+        int availableSeats = tripDoc['available_seats'] ?? 0;
+        int requestedSeats = p['seats_booked'] ?? 1;
 
-        setState(() {
-          _rideStatus = "in_progress";
+        if (availableSeats >= requestedSeats) {
+          // 1. Deduct seats from the carpool capacity
+          transaction.update(
+              tripRef, {'available_seats': availableSeats - requestedSeats});
+          // 2. Mark passenger as officially booked
+          transaction.update(passRef, {'status': 'awaiting_pickup'});
+        } else {
+          throw Exception("Not enough seats available in your car!");
+        }
+      });
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("Request Accepted!"), backgroundColor: Colors.green));
+    } catch (e) {
+      debugPrint("Error accepting: $e");
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.toString()), backgroundColor: Colors.red));
+    }
+  }
+
+  // 🟢 NEW: Reject Passenger Logic
+  Future<void> _rejectPassenger(String passengerId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('shared_trips')
+          .doc(_tripId)
+          .collection('passengers')
+          .doc(passengerId)
+          .update({'status': 'rejected'});
+    } catch (e) {
+      debugPrint("Error rejecting: $e");
+    }
+  }
+
+  // 🟢 NEW: Driver actively cancelling a no-show rider
+  Future<void> _cancelNoShowPassenger(
+      String passengerId, int seatsBooked) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      double penaltyAmount = 0.0;
+      double ratingPenalty = 0.0;
+      double newRiderRating = 5.0;
+
+      int waitBlockMinutes = 1;
+      int feePerBlock = 1;
+      int penaltyBlockMinutes = 1;
+      double penaltyPerBlock = 0.1;
+
+      DateTime? arrivedAt = _passengerArrivalTimes[passengerId];
+
+      if (arrivedAt != null) {
+        int totalWaitMinutes = DateTime.now().difference(arrivedAt).inMinutes;
+        int feeBlocks = (totalWaitMinutes / waitBlockMinutes).floor();
+        penaltyAmount = (feeBlocks * feePerBlock).toDouble();
+
+        int penaltyBlocks = (totalWaitMinutes / penaltyBlockMinutes).floor();
+        ratingPenalty = penaltyBlocks * penaltyPerBlock;
+      }
+
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        DocumentReference tripRef =
+            FirebaseFirestore.instance.collection('shared_trips').doc(_tripId);
+        DocumentReference passRef =
+            tripRef.collection('passengers').doc(passengerId);
+        DocumentReference riderRef =
+            FirebaseFirestore.instance.collection('users').doc(passengerId);
+        DocumentReference driverWalletRef =
+            FirebaseFirestore.instance.collection('wallets').doc(user.uid);
+
+        DocumentSnapshot tripDoc = await transaction.get(tripRef);
+        DocumentSnapshot riderDoc = await transaction.get(riderRef);
+
+        if (riderDoc.exists) {
+          double currentRating = _parseDouble(
+              (riderDoc.data() as Map<String, dynamic>)['rating'] ?? 5.0);
+          newRiderRating = (currentRating - ratingPenalty);
+          if (newRiderRating < 1.0) newRiderRating = 1.0;
+        }
+
+        // Restore seats
+        int currentSeats = tripDoc['available_seats'] ?? 0;
+        transaction
+            .update(tripRef, {'available_seats': currentSeats + seatsBooked});
+
+        // Mark as cancelled by driver
+        transaction.update(passRef, {
+          'status': 'cancelled_by_driver',
+          'penalty_applied': penaltyAmount
         });
 
-        _updateRoutesAndCarbon(_currentVisualPos);
+        // Apply penalty to Rider profile
+        if (penaltyAmount > 0 || ratingPenalty > 0) {
+          Map<String, dynamic> riderUpdates = {};
+          if (penaltyAmount > 0)
+            riderUpdates['negative_balance'] =
+                FieldValue.increment(penaltyAmount);
+          if (ratingPenalty > 0) riderUpdates['rating'] = newRiderRating;
+          transaction.update(riderRef, riderUpdates);
+        }
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text("Trip Started! Drive safely."),
-              backgroundColor: Colors.green),
-        );
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+        // Compensate Driver Wallet immediately
+        if (penaltyAmount > 0) {
+          transaction.set(
+              driverWalletRef,
+              {
+                'balance': FieldValue.increment(penaltyAmount),
+                'last_updated': FieldValue.serverTimestamp(),
+              },
+              SetOptions(merge: true));
+        }
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("Passenger Cancelled (No-Show). Seats restored."),
+            backgroundColor: Colors.orange));
       }
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("Invalid OTP"), backgroundColor: Colors.red));
+    } catch (e) {
+      debugPrint("Error cancelling no-show: $e");
+    }
+  }
+
+  Future<void> _verifyPassengerOtp(String passengerId, double baseFare) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception("Driver not authenticated!");
+
+      double waitingFee = 0.0;
+      double ratingPenalty = 0.0;
+      double newRiderRating = 5.0;
+
+      int waitBlockMinutes = 1;
+      int feePerBlock = 1;
+      int penaltyBlockMinutes = 1;
+      double penaltyPerBlock = 0.1;
+
+      DateTime? arrivedAt = _passengerArrivalTimes[passengerId];
+
+      if (arrivedAt != null) {
+        int totalWaitMinutes = DateTime.now().difference(arrivedAt).inMinutes;
+        int feeBlocks = (totalWaitMinutes / waitBlockMinutes).floor();
+        waitingFee = (feeBlocks * feePerBlock).toDouble();
+
+        int penaltyBlocks = (totalWaitMinutes / penaltyBlockMinutes).floor();
+        ratingPenalty = penaltyBlocks * penaltyPerBlock;
+      }
+
+      DocumentReference riderRef =
+          FirebaseFirestore.instance.collection('users').doc(passengerId);
+      DocumentSnapshot riderDoc = await riderRef.get();
+
+      if (riderDoc.exists) {
+        double currentRating = _parseDouble(
+            (riderDoc.data() as Map<String, dynamic>)['rating'] ?? 5.0);
+        newRiderRating = (currentRating - ratingPenalty);
+        if (newRiderRating < 1.0) newRiderRating = 1.0;
+      }
+
+      double newTotalFare = baseFare + waitingFee;
+      WriteBatch batch = FirebaseFirestore.instance.batch();
+
+      DocumentReference passRef = FirebaseFirestore.instance
+          .collection('shared_trips')
+          .doc(_tripId)
+          .collection('passengers')
+          .doc(passengerId);
+
+      batch.update(passRef, {
+        'status': 'in_transit',
+        'fare': newTotalFare,
+        'waiting_fee_applied': waitingFee,
+      });
+
+      if (ratingPenalty > 0 || waitingFee > 0) {
+        // 🟢 Applying negative balance to rider
+        Map<String, dynamic> riderUpdates = {};
+        if (waitingFee > 0)
+          riderUpdates['negative_balance'] = FieldValue.increment(waitingFee);
+        if (ratingPenalty > 0) riderUpdates['rating'] = newRiderRating;
+        batch.update(riderRef, riderUpdates);
+      }
+
+      if (waitingFee > 0) {
+        DocumentReference walletRef =
+            FirebaseFirestore.instance.collection('wallets').doc(user.uid);
+        batch.set(
+            walletRef,
+            {
+              'balance': FieldValue.increment(waitingFee),
+              'last_updated': FieldValue.serverTimestamp(),
+            },
+            SetOptions(merge: true));
+      }
+
+      await batch.commit();
+
+      if (waitingFee > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                "Picked up! Added ₹${waitingFee.toStringAsFixed(0)} fee. Rider lost ${ratingPenalty.toStringAsFixed(2)} stars."),
+            backgroundColor: Colors.green));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("Passenger Picked Up!"),
+            backgroundColor: Colors.green));
+      }
+    } catch (e) {
+      debugPrint("Error updating passenger: $e");
+    }
+  }
+
+  Future<void> _dropOffPassenger(Map<String, dynamic> p) async {
+    String passengerId = p['passenger_id'];
+    int seatsFreed = p['seats_booked'];
+    double fareEarned = (p['fare'] ?? 0.0).toDouble();
+
+    try {
+      WriteBatch batch = FirebaseFirestore.instance.batch();
+
+      DocumentReference tripRef =
+          FirebaseFirestore.instance.collection('shared_trips').doc(_tripId);
+      DocumentReference passRef =
+          tripRef.collection('passengers').doc(passengerId);
+
+      batch.update(passRef, {
+        'status': 'dropped_off',
+        'drop_time': FieldValue.serverTimestamp(),
+      });
+
+      batch.update(tripRef, {
+        'available_seats': FieldValue.increment(seatsFreed),
+        'total_earned': FieldValue.increment(fareEarned),
+        'completed_passengers': FieldValue.arrayUnion([
+          {
+            'passenger_id': passengerId,
+            'fare': fareEarned,
+            'seats': seatsFreed,
+          }
+        ])
+      });
+
+      await batch.commit();
+
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              "Dropped off! ₹${fareEarned.toStringAsFixed(0)} added to shift."),
+          backgroundColor: Colors.blue));
+    } catch (e) {
+      debugPrint("Error dropping off: $e");
+    }
+  }
+
+  Future<void> _endEntireTrip() async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('shared_trips')
+          .doc(_tripId)
+          .update({
+        'status': 'completed',
+        'carbon_saved_kg': _carbonSaved,
+        'completed_at': FieldValue.serverTimestamp(),
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("Shared Trip Completed"),
+            backgroundColor: Colors.blue));
+        mainNavController.index = 1;
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      debugPrint("End trip error: $e");
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-          title: Text(_rideStatus == "accepted"
-              ? "Navigate to Pickup"
-              : "Navigate to Drop")),
+      appBar: AppBar(title: const Text("Shared Route Navigation")),
       body: _currentVisualPos.latitude == 0
           ? const Center(child: CircularProgressIndicator())
           : Stack(
@@ -473,9 +744,9 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
                   markers: _markers,
                   polylines: _polylines,
                   onMapCreated: (controller) => _mapController = controller,
+                  padding: const EdgeInsets.only(
+                      bottom: 350), // Adjust padding for taller panel
                 ),
-
-                // Carbon Emission Display
                 Positioned(
                   top: 20,
                   left: 20,
@@ -491,129 +762,164 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
                     ),
                   ),
                 ),
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: _buildPassengerPanel(),
+                )
               ],
             ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: _rideStatus == "accepted"
-          ? FloatingActionButton.extended(
-              onPressed: _showOtpBottomSheet,
-              label: const Text("START TRIP",
-                  style: TextStyle(color: Colors.white)),
-              icon: const Icon(Icons.play_arrow, color: Colors.white),
-              backgroundColor: Colors.green,
+    );
+  }
+
+  // 🟢 UPDATED: Added a Long-Press to Cancel a No-Show rider
+  Widget _buildPassengerPanel() {
+    List<Map<String, dynamic>> pendingPassengers =
+        _passengers.where((p) => p['status'] == 'pending_approval').toList();
+    List<Map<String, dynamic>> activePassengers = _passengers
+        .where((p) =>
+            p['status'] == 'awaiting_pickup' || p['status'] == 'in_transit')
+        .toList();
+
+    return Container(
+      height: 380, // Taller to fit new requests
+      decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          boxShadow: [
+            BoxShadow(color: Colors.black26, blurRadius: 15, spreadRadius: 5)
+          ]),
+      child: Column(
+        children: [
+          Container(
+            margin: const EdgeInsets.only(top: 12, bottom: 8),
+            height: 5,
+            width: 40,
+            decoration: BoxDecoration(
+                color: Colors.grey[400],
+                borderRadius: BorderRadius.circular(10)),
+          ),
+
+          // --- PENDING REQUESTS SECTION ---
+          if (pendingPassengers.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+              child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text("New Requests",
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange,
+                          fontSize: 16))),
+            ),
+            ...pendingPassengers.map((p) => ListTile(
+                  dense: true,
+                  leading: const CircleAvatar(
+                      backgroundColor: Colors.orange,
+                      child: Icon(Icons.person_add,
+                          color: Colors.white, size: 20)),
+                  title: Text("Rider (${p['seats_booked']} seats)"),
+                  subtitle: Text(
+                      "Rating: ⭐ ${(p['rider_rating'] ?? 5.0).toStringAsFixed(1)}"),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.cancel,
+                            color: Colors.red, size: 32),
+                        onPressed: () => _rejectPassenger(p['passenger_id']),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.check_circle,
+                            color: Colors.green, size: 32),
+                        onPressed: () => _acceptPassenger(p),
+                      ),
+                    ],
+                  ),
+                )),
+            const Divider(),
+          ],
+
+          // --- ACTIVE MANIFEST SECTION ---
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text("Passenger Manifest",
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+          ),
+          if (activePassengers.isEmpty)
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text("No active passengers.",
+                        style: TextStyle(color: Colors.grey)),
+                    const SizedBox(height: 15),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.redAccent),
+                      onPressed: _endEntireTrip,
+                      child: const Text("END SHIFT",
+                          style: TextStyle(color: Colors.white)),
+                    )
+                  ],
+                ),
+              ),
             )
-          : null,
-    );
-  }
+          else
+            Expanded(
+              child: ListView.builder(
+                padding: EdgeInsets.zero,
+                itemCount: activePassengers.length,
+                itemBuilder: (context, index) {
+                  var p = activePassengers[index];
+                  bool isAwaiting = p['status'] == 'awaiting_pickup';
 
-  void _showOtpBottomSheet() {
-    final TextEditingController otpController = TextEditingController();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-            left: 20,
-            right: 20,
-            top: 30,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                "Enter Ride OTP",
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
+                  return ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor:
+                          isAwaiting ? Colors.redAccent : Colors.blueAccent,
+                      child: Icon(isAwaiting ? Icons.hail : Icons.flag,
+                          color: Colors.white),
+                    ),
+                    title: Text("Passenger (${p['seats_booked']} seats)"),
+                    subtitle: Text(
+                        isAwaiting
+                            ? "Awaiting Pickup (Hold to cancel)"
+                            : "In Transit",
+                        style: TextStyle(
+                            color: isAwaiting ? Colors.orange : Colors.green,
+                            fontSize: 12)),
+                    onLongPress: () {
+                      if (isAwaiting) {
+                        // 🟢 Allow driver to manually cancel a no-show rider
+                        _cancelNoShowPassenger(
+                            p['passenger_id'], p['seats_booked']);
+                      }
+                    },
+                    trailing: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isAwaiting ? Colors.green : Colors.red,
+                      ),
+                      onPressed: () {
+                        if (isAwaiting) {
+                          double baseFare = (p['fare'] ?? 0.0).toDouble();
+                          _showOtpBottomSheet(
+                              p['passenger_id'], p['otp'] ?? "1234", baseFare);
+                        } else {
+                          _dropOffPassenger(p);
+                        }
+                      },
+                      child: Text(isAwaiting ? "PICKUP" : "DROP OFF",
+                          style: const TextStyle(color: Colors.white)),
+                    ),
+                  );
+                },
               ),
-              const SizedBox(height: 20),
-
-              /// OTP BOXES
-              TextField(
-                controller: otpController,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 24,
-                    letterSpacing: 12,
-                    fontWeight: FontWeight.bold),
-                decoration: InputDecoration(
-                  counterText: "",
-                  filled: true,
-                  fillColor: Colors.grey[200],
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              SizedBox(
-                width: double.infinity,
-                height: 55,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                  ),
-                  onPressed: () => _verifyOtp(otpController.text),
-                  child: const Text(
-                    "START TRIP",
-                    style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 20),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _showCancelledScreen() async {
-    return showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => Dialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(30),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: const [
-              Icon(Icons.cancel, color: Colors.red, size: 70),
-              SizedBox(height: 20),
-              Text(
-                "OOPS!",
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-              ),
-              SizedBox(height: 10),
-              Text(
-                "The ride was cancelled by the rider.",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
-              ),
-            ],
-          ),
-        ),
+            )
+        ],
       ),
     );
   }

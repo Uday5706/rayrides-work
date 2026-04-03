@@ -1,8 +1,7 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // 🟢 Required for Profile Checks
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_google_places_hoc081098/flutter_google_places_hoc081098.dart';
@@ -13,9 +12,6 @@ import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:google_maps_webservice/places.dart' as gm_webservice;
-import 'package:hive/hive.dart';
-import 'package:rayride/offline_Booking_Screen.dart';
-import 'package:uuid/uuid.dart';
 
 import 'live_ride_tracking_screen.dart';
 
@@ -30,7 +26,10 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
   GoogleMapController? _mapController;
   final TextEditingController _pickupController = TextEditingController();
   final TextEditingController _dropController = TextEditingController();
-  final TextEditingController _fareController = TextEditingController();
+
+  int _requestedSeats = 1;
+  List<Map<String, dynamic>> _availableSharedTrips = [];
+  double _calculatedDistanceKm = 0.0;
 
   String _locationStatus = "Detecting current location...";
   Position? _currentPosition;
@@ -39,8 +38,11 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
   Map<PolylineId, Polyline> _polylines = {};
   List<LatLng> _polylineCoordinates = [];
   bool _isSearching = false;
-  String? _currentRideId;
-  StreamSubscription<DocumentSnapshot>? _rideSubscription;
+
+  // 🟢 NEW: Rider Profile State
+  double _negativeBalance = 0.0;
+  double _riderRating = 5.0;
+  bool _isLoadingProfile = true;
 
   final String _pickupId = "pickup_marker";
   final String _dropId = "drop_marker";
@@ -52,12 +54,64 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
   void initState() {
     super.initState();
     _determinePosition();
+    _fetchRiderProfile(); // 🟢 Fetch penalties and ratings on load
   }
 
   @override
   void dispose() {
-    _rideSubscription?.cancel(); // Cancel listener to prevent memory leaks
     super.dispose();
+  }
+
+  // 🟢 NEW: Fetch the user's profile to check for penalties
+  Future<void> _fetchRiderProfile() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        if (doc.exists && mounted) {
+          setState(() {
+            _negativeBalance =
+                (doc.data()?['negative_balance'] ?? 0.0).toDouble();
+            _riderRating = (doc.data()?['rating'] ?? 5.0).toDouble();
+            _isLoadingProfile = false;
+          });
+        } else {
+          if (mounted) setState(() => _isLoadingProfile = false);
+        }
+      } else {
+        if (mounted) setState(() => _isLoadingProfile = false);
+      }
+    } catch (e) {
+      debugPrint("Error fetching profile: $e");
+      if (mounted) setState(() => _isLoadingProfile = false);
+    }
+  }
+
+  // 🟢 NEW: Simulated Payment function to clear penalty
+  Future<void> _payPenalty() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      // Simulate calling Razorpay/Stripe here, then clear the database flag
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update({
+        'negative_balance': 0.0,
+      });
+
+      setState(() {
+        _negativeBalance = 0.0;
+      });
+
+      _showSnackBar("Penalty paid! You can now book rides.", Colors.green);
+    } catch (e) {
+      _showSnackBar("Payment failed. Please try again.", Colors.red);
+    }
   }
 
   Future<void> _determinePosition() async {
@@ -132,6 +186,13 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
       for (var point in result.points) {
         _polylineCoordinates.add(LatLng(point.latitude, point.longitude));
       }
+
+      _calculatedDistanceKm = Geolocator.distanceBetween(
+              _currentPosition!.latitude,
+              _currentPosition!.longitude,
+              _dropLatLng!.latitude,
+              _dropLatLng!.longitude) /
+          1000;
 
       setState(() {
         _polylines[const PolylineId("ride_route")] = Polyline(
@@ -218,96 +279,189 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
     }
   }
 
-  Future<bool> _isOnline() async {
-    try {
-      final List<ConnectivityResult> results =
-          await Connectivity().checkConnectivity();
-      if (results.isEmpty || results.contains(ConnectivityResult.none)) {
-        return false;
-      }
-      return true;
-    } catch (e) {
-      return true;
-    }
+  void _showSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message), backgroundColor: color));
   }
 
-  // UPDATED: Confirm booking now includes real-time handshake logic
-  Future<void> _confirmBooking() async {
-    if (_dropController.text.isEmpty || _fareController.text.isEmpty) {
-      _showSnackBar("Please provide all details", Colors.red);
+  Future<void> _searchSharedTrips() async {
+    if (_dropController.text.isEmpty) {
+      _showSnackBar("Please provide drop location", Colors.red);
       return;
     }
 
-    bool online = await _isOnline();
-    final String rideId = const Uuid().v4();
-    _currentRideId = rideId;
-    final double fare = double.tryParse(_fareController.text) ?? 100.0;
-    final String otp =
-        (1000 + (DateTime.now().millisecondsSinceEpoch % 9000)).toString();
+    setState(() => _isSearching = true);
 
-    if (online) {
-      setState(() => _isSearching = true);
-      try {
-        await FirebaseFirestore.instance.collection('rides').doc(rideId).set({
-          'rideId': rideId,
-          'pickup_name': _pickupController.text,
-          'drop_name': _dropController.text,
+    try {
+      QuerySnapshot snapshot = await FirebaseFirestore.instance
+          .collection('shared_trips')
+          .where('status', isEqualTo: 'active')
+          .where('available_seats', isGreaterThanOrEqualTo: _requestedSeats)
+          .get();
+
+      List<Map<String, dynamic>> validTrips = [];
+
+      for (var doc in snapshot.docs) {
+        var data = doc.data() as Map<String, dynamic>;
+
+        double driverLat = data['current_lat'];
+        double driverLng = data['current_lng'];
+
+        double distanceToDriver = Geolocator.distanceBetween(
+            _currentPosition!.latitude,
+            _currentPosition!.longitude,
+            driverLat,
+            driverLng);
+
+        if (distanceToDriver <= 5000) {
+          double perKmRate = data['per_seat_fare_per_km'] ?? 12.0;
+          double calculatedFare =
+              _calculatedDistanceKm * perKmRate * _requestedSeats;
+
+          data['calculated_fare'] = calculatedFare;
+          data['trip_id'] = doc.id;
+          data['distance_away'] = (distanceToDriver / 1000).toStringAsFixed(1);
+
+          validTrips.add(data);
+        }
+      }
+
+      setState(() {
+        _isSearching = false;
+        _availableSharedTrips = validTrips;
+      });
+
+      if (validTrips.isEmpty) {
+        _showSnackBar("No shared rides available nearby", Colors.orange);
+      } else {
+        _showAvailableRidesSheet();
+      }
+    } catch (e) {
+      setState(() => _isSearching = false);
+      _showSnackBar("Error finding rides: $e", Colors.red);
+    }
+  }
+
+  // 🟢 UPDATED: Booking Logic now uses pending_approval and attaches Rating
+  Future<void> _bookSelectedTrip(Map<String, dynamic> tripData) async {
+    final String tripId = tripData['trip_id'];
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _showSnackBar("Please log in first", Colors.red);
+      return;
+    }
+    final String passId = user.uid; // 🟢 We now strictly use the UID
+
+    try {
+      // 🟢 1. No atomic transaction deducting seats here!
+      // We just push the document with a 'pending_approval' flag.
+      DocumentReference tripRef =
+          FirebaseFirestore.instance.collection('shared_trips').doc(tripId);
+      DocumentReference passengerRef =
+          tripRef.collection('passengers').doc(passId);
+
+      await passengerRef.set({
+        'passenger_id': passId,
+        'pickup_lat': _currentPosition!.latitude,
+        'pickup_lng': _currentPosition!.longitude,
+        'drop_lat': _dropLatLng!.latitude,
+        'drop_lng': _dropLatLng!.longitude,
+        'seats_booked': _requestedSeats,
+        'fare': tripData['calculated_fare'],
+        'status': 'pending_approval', // Driver must accept this
+        'rider_rating': _riderRating, // Driver sees this before accepting
+        'created_at': FieldValue.serverTimestamp(),
+      });
+
+      _showSnackBar(
+          "Request sent! Waiting for driver approval...", Colors.green);
+
+      if (mounted) {
+        Map<String, dynamic> ridePayload = {
+          'trip_id': tripId,
+          'passenger_id': passId,
+          'driver_name': tripData['driver_name'],
+          'vehicle_number': tripData['vehicle_number'] ?? "Carpool Vehicle",
           'pickup_lat': _currentPosition!.latitude,
           'pickup_lng': _currentPosition!.longitude,
           'drop_lat': _dropLatLng!.latitude,
           'drop_lng': _dropLatLng!.longitude,
-          'fare': fare,
-          'status': 'searching', //change to searching to work properly
-          'otp': otp,
-          'timestamp': FieldValue.serverTimestamp(),
-        });
+          'fare': tripData['calculated_fare'],
+          'seats_booked': _requestedSeats,
+          'current_lat': tripData['current_lat'],
+          'current_lng': tripData['current_lng'],
+          'current_heading': tripData['current_heading'],
+        };
 
-        // HANDSHAKE LISTENER: Triggers when driver clicks "Accept"
-        _rideSubscription = FirebaseFirestore.instance
-            .collection('rides')
-            .doc(rideId)
-            .snapshots()
-            .listen((snapshot) {
-          if (snapshot.exists) {
-            var data = snapshot.data() as Map<String, dynamic>;
-            if (data['status'] == 'accepted') {
-              _rideSubscription?.cancel(); // Stop listening
-              if (!mounted) return;
-
-              setState(() => _isSearching = false);
-
-              // Move to Tracking Screen immediately
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => LiveRideTrackingScreen(
-                    rideId: rideId,
-                    rideData: data,
-                  ),
-                ),
-              );
-            }
-          }
-        });
-      } catch (e) {
-        setState(() => _isSearching = false);
-        _showSnackBar(
-            "Booking failed: Please check Firebase Rules", Colors.red);
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => LiveRideTrackingScreen(rideData: ridePayload),
+          ),
+        );
       }
-    } else {
-      final box = await Hive.openBox('offline_bookings');
-      await box.put(rideId, {
-        'pickup': _pickupController.text,
-        'drop': _dropController.text,
-        'fare': fare
-      });
-      _showSnackBar("Saved to Offline Logs", Colors.orange);
+    } catch (e) {
+      _showSnackBar("Booking failed: $e", Colors.red);
     }
   }
 
-  void _showSnackBar(String message, Color color) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message), backgroundColor: color));
+  void _showAvailableRidesSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text("Available Rides",
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _availableSharedTrips.length,
+                  itemBuilder: (context, index) {
+                    var trip = _availableSharedTrips[index];
+                    return ListTile(
+                      leading:
+                          const CircleAvatar(child: Icon(Icons.directions_car)),
+                      title: Text(
+                          "${trip['driver_name']} • ${trip['distance_away']} km away"),
+                      subtitle: Text("Seats left: ${trip['available_seats']}"),
+                      trailing: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text("₹${trip['calculated_fare'].toStringAsFixed(0)}",
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18,
+                                  color: Colors.green)),
+                          ElevatedButton(
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _bookSelectedTrip(trip);
+                            },
+                            child: const Text("Book"),
+                          )
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -326,8 +480,13 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
             myLocationButtonEnabled: false,
           ),
           _buildTopOverlay(),
+
+          // 🟢 Conditionally show the booking tools or the penalty block
           _buildBottomOverlay(),
-          if (_isSearching) _buildSearchingLoader(),
+
+          if (_isSearching)
+            const Center(
+                child: CircularProgressIndicator(color: Colors.orangeAccent)),
         ],
       ),
     );
@@ -363,104 +522,104 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
       bottom: 0,
       left: 0,
       right: 0,
-      child: _glassContainer(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.my_location, color: Colors.blueAccent),
-              title: const Text("Current Location"),
-              subtitle: Text(_locationStatus),
-              trailing: IconButton(
-                  icon: const Icon(Icons.refresh),
-                  onPressed: _determinePosition),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: TextField(
-                controller: _fareController,
-                keyboardType: TextInputType.number,
-                decoration:
-                    const InputDecoration(labelText: "Proposed Fare (₹)"),
-              ),
-            ),
-            const SizedBox(height: 15),
-            Row(
-              children: [
-                Expanded(
-                  flex: 5,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orangeAccent,
-                        padding: const EdgeInsets.symmetric(vertical: 15)),
-                    onPressed: _confirmBooking,
-                    child: const Text("Confirm Ride",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.white)),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  flex: 1,
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        side: const BorderSide(color: Colors.orangeAccent),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10))),
-                    onPressed: () {
-                      Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) =>
-                                  const OfflineBookingsScreen()));
-                    },
-                    child: const Icon(Icons.access_time,
-                        color: Colors.orangeAccent),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+      child: Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.95),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: const [
+              BoxShadow(color: Colors.black12, blurRadius: 20)
+            ]),
+
+        // 🟢 Check if loading, blocked by penalty, or normal
+        child: _isLoadingProfile
+            ? const SizedBox(
+                height: 100, child: Center(child: CircularProgressIndicator()))
+            : _negativeBalance > 0
+                ? _buildPenaltyUI()
+                : _buildNormalBookingUI(),
       ),
     );
   }
 
-  Widget _buildSearchingLoader() {
-    return BackdropFilter(
-      filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-      child: Container(
-        color: Colors.black26,
-        child: Center(
-          child: _glassContainer(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(color: Colors.orangeAccent),
-                const SizedBox(height: 20),
-                const Text("Finding nearby drivers...",
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                const Text("Drivers within 500m are being notified"),
-                const SizedBox(height: 20),
-                TextButton(
-                  onPressed: () {
-                    _rideSubscription?.cancel();
-                    FirebaseFirestore.instance
-                        .collection('rides')
-                        .doc(_currentRideId)
-                        .delete();
-                    setState(() => _isSearching = false);
-                  },
-                  child: const Text("Cancel Search",
-                      style: TextStyle(color: Colors.red)),
-                )
-              ],
-            ),
+  // 🟢 NEW: Penalty UI
+  Widget _buildPenaltyUI() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 40),
+        const SizedBox(height: 10),
+        const Text("Booking Blocked",
+            style: TextStyle(
+                fontSize: 18, fontWeight: FontWeight.bold, color: Colors.red)),
+        const SizedBox(height: 5),
+        Text(
+            "You have an unpaid penalty of ₹${_negativeBalance.toStringAsFixed(0)} for making a driver wait.",
+            textAlign: TextAlign.center),
+        const SizedBox(height: 15),
+        SizedBox(
+          width: double.infinity,
+          height: 50,
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.black,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12))),
+            onPressed: _payPenalty,
+            child: Text("Pay ₹${_negativeBalance.toStringAsFixed(0)} to Unlock",
+                style: const TextStyle(color: Colors.white, fontSize: 16)),
           ),
+        )
+      ],
+    );
+  }
+
+  Widget _buildNormalBookingUI() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text("Seats Required:",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.remove_circle_outline),
+                  onPressed: () => setState(() {
+                    if (_requestedSeats > 1) _requestedSeats--;
+                  }),
+                ),
+                Text("$_requestedSeats",
+                    style: const TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.bold)),
+                IconButton(
+                  icon: const Icon(Icons.add_circle_outline),
+                  onPressed: () => setState(() {
+                    if (_requestedSeats < 6) _requestedSeats++;
+                  }),
+                ),
+              ],
+            )
+          ],
         ),
-      ),
+        const SizedBox(height: 15),
+        SizedBox(
+          width: double.infinity,
+          height: 50,
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.black,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12))),
+            onPressed: _searchSharedTrips,
+            child: const Text("Find Shared Rides",
+                style: TextStyle(color: Colors.white, fontSize: 16)),
+          ),
+        )
+      ],
     );
   }
 
@@ -481,18 +640,6 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
             border: InputBorder.none,
             contentPadding: const EdgeInsets.symmetric(vertical: 15)),
       ),
-    );
-  }
-
-  Widget _glassContainer({required Widget child}) {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.9),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 20)]),
-      child: child,
     );
   }
 }

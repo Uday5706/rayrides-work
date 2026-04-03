@@ -1,76 +1,91 @@
-import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // Add Firestore import
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:rayride/Otp_verify_screen.dart';
+// Import your next screen so you can navigate after auto-login
+// import 'package:rayride/role_selection_screen.dart';
 
-class loginscreen extends StatefulWidget{
+class loginscreen extends StatefulWidget {
   @override
   State<StatefulWidget> createState() {
     return _LoginScreenState();
   }
 }
 
-class _LoginScreenState extends State<loginscreen>{
+class _LoginScreenState extends State<loginscreen> {
   TextEditingController phonenumber = TextEditingController();
   FirebaseAuth _auth = FirebaseAuth.instance;
 
   String formatPhoneNumber(String input) {
-  input = input.replaceAll(RegExp(r'\D'), ''); // Remove all non-digits
-  if (input.startsWith('91') && input.length == 12) {
-    return '+$input';
-  } else if (input.length == 10) {
-    return '+91$input'; // Default to India
+    input = input.replaceAll(RegExp(r'\D'), ''); // Remove all non-digits
+    if (input.startsWith('91') && input.length == 12) {
+      return '+$input';
+    } else if (input.length == 10) {
+      return '+91$input'; // Default to India
+    }
+    return '+$input'; // Fallback, use at own risk
   }
-  return '+$input'; // Fallback, use at own risk
-}
 
-  void sendotp()async{
+  void sendotp() async {
     String phone = formatPhoneNumber(phonenumber.text);
 
     await _auth.verifyPhoneNumber(
-  phoneNumber: phone,
-  verificationCompleted: (PhoneAuthCredential credential) async {
-    print("Auto verification completed!");
-    await _auth.signInWithCredential(credential);
-  },
-  verificationFailed: (FirebaseAuthException e) {
-    print("Verification failed: ${e.message}");
-  },
-  codeSent: (String verificationId, int? resendToken) {
-    print("Code sent: $verificationId");
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => OTPscreen(verificationId: verificationId),
-      ),
+      phoneNumber: phone,
+      verificationCompleted: (PhoneAuthCredential credential) async {
+        print("Auto verification completed!");
+
+        try {
+          // 1. Sign the user in
+          UserCredential userCredential =
+              await _auth.signInWithCredential(credential);
+
+          // 2. Save user to Firestore
+          if (userCredential.user != null) {
+            final user = userCredential.user!;
+
+            // Use SetOptions(merge: true) so you don't overwrite existing data
+            // if an older user logs in again.
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .set({
+              'uid': user.uid,
+              'phone': user.phoneNumber,
+              'created_at': FieldValue.serverTimestamp(),
+              'is_active': true,
+              // Add any other default fields here
+            }, SetOptions(merge: true));
+
+            print("User saved to Firestore!");
+
+            // 3. Navigate to your main dashboard or role selection screen
+            // Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const roleSelection()));
+          }
+        } catch (e) {
+          print("Auto sign-in failed: $e");
+        }
+      },
+      verificationFailed: (FirebaseAuthException e) {
+        print("Verification failed: ${e.message}");
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Verification failed: ${e.message}")),
+        );
+      },
+      codeSent: (String verificationId, int? resendToken) {
+        print("Code sent: $verificationId");
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => OTPscreen(verificationId: verificationId),
+          ),
+        );
+      },
+      codeAutoRetrievalTimeout: (String verificationId) {
+        print("Timeout: $verificationId");
+      },
     );
-  },
-  codeAutoRetrievalTimeout: (String verificationId) {
-    print("Timeout: $verificationId");
-  },
-);
-
-
-// await _auth.verifyPhoneNumber(
-//   phoneNumber: '+911234567890',
-//   timeout: Duration(seconds: 60),
-//   verificationCompleted: (PhoneAuthCredential credential) async {
-//     // Auto-sign in
-//     await _auth.signInWithCredential(credential);
-//   },
-//   verificationFailed: (FirebaseAuthException e) {
-//     print("Verification failed: ${e.message}");
-//   },
-//   codeSent: (String verificationId, int? resendToken) {
-//     // For manual code entry: use code 123456
-//   },
-//   codeAutoRetrievalTimeout: (String verificationId) {
-//     // Handle timeout if needed
-//   },
-// );
-
-
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -119,7 +134,8 @@ class _LoginScreenState extends State<loginscreen>{
                         child: Stack(
                           alignment: Alignment.center,
                           children: [
-                            Icon(Icons.smartphone, size: 40, color: Colors.grey[600]),
+                            Icon(Icons.smartphone,
+                                size: 40, color: Colors.grey[600]),
                             Positioned(
                               right: 8,
                               top: 8,
@@ -130,7 +146,8 @@ class _LoginScreenState extends State<loginscreen>{
                                   color: Colors.red,
                                   borderRadius: BorderRadius.circular(4),
                                 ),
-                                child: Icon(Icons.message, size: 12, color: Colors.white),
+                                child: Icon(Icons.message,
+                                    size: 12, color: Colors.white),
                               ),
                             ),
                           ],
@@ -157,24 +174,27 @@ class _LoginScreenState extends State<loginscreen>{
                         controller: phonenumber,
                         decoration: InputDecoration(
                           hintText: 'Mobile Number',
-                          hintStyle: TextStyle(color: Colors.grey[400], fontSize: 16),
+                          hintStyle:
+                              TextStyle(color: Colors.grey[400], fontSize: 16),
                           filled: true,
                           fillColor: Colors.grey[50],
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
                           ),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                          contentPadding: EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 16),
                         ),
                         keyboardType: TextInputType.phone,
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w500),
                       ),
                       SizedBox(height: 32),
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
                           onPressed: () {
-                           sendotp();
+                            sendotp();
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Color(0xFFFF7043),
@@ -187,7 +207,8 @@ class _LoginScreenState extends State<loginscreen>{
                           ),
                           child: Text(
                             'Send',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                            style: TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w600),
                           ),
                         ),
                       ),
