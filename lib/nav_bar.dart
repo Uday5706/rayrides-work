@@ -6,13 +6,15 @@ import 'package:rayride/driver_map_tracking_screen.dart';
 import 'package:rayride/fare_offer_screen.dart';
 import 'package:rayride/wallet_screen.dart';
 
+/// ✅ GLOBAL CONTROLLER
+final PersistentTabController mainNavController =
+    PersistentTabController(initialIndex: 0);
+
 class mainnavbar extends StatefulWidget {
   const mainnavbar({super.key});
 
   @override
-  State<StatefulWidget> createState() {
-    return _MainnavbarState();
-  }
+  State<StatefulWidget> createState() => _MainnavbarState();
 }
 
 class _MainnavbarState extends State<mainnavbar> {
@@ -20,9 +22,7 @@ class _MainnavbarState extends State<mainnavbar> {
     return [
       DashboardScreen(),
       fareOfferScreen(),
-      DriverMapTrackingScreen(
-        rideData: {},
-      ),
+      DriverMapTrackingScreen(rideData: {}),
       WalletScreen(),
       Notificationscreen(),
     ];
@@ -31,31 +31,31 @@ class _MainnavbarState extends State<mainnavbar> {
   List<PersistentBottomNavBarItem> _navbaritems() {
     return [
       PersistentBottomNavBarItem(
-        icon: Icon(Icons.dashboard),
+        icon: const Icon(Icons.dashboard),
         title: "Dashboard",
         activeColorPrimary: Colors.blue,
         inactiveColorPrimary: Colors.grey,
       ),
       PersistentBottomNavBarItem(
-        icon: Icon(Icons.whatshot, color: Colors.redAccent),
+        icon: const Icon(Icons.whatshot, color: Colors.redAccent),
         title: "Fare Offers",
         activeColorPrimary: Colors.redAccent,
         inactiveColorPrimary: Colors.grey,
       ),
       PersistentBottomNavBarItem(
-        icon: Icon(Icons.map, color: Colors.green),
+        icon: const Icon(Icons.map, color: Colors.green),
         title: "Map",
         activeColorPrimary: Colors.green,
         inactiveColorPrimary: Colors.grey,
       ),
       PersistentBottomNavBarItem(
-        icon: Icon(Icons.account_balance_wallet, color: Colors.orange),
+        icon: const Icon(Icons.account_balance_wallet, color: Colors.orange),
         title: "Wallet",
         activeColorPrimary: Colors.orange,
         inactiveColorPrimary: Colors.grey,
       ),
       PersistentBottomNavBarItem(
-        icon: Icon(Icons.notifications, color: Colors.purple),
+        icon: const Icon(Icons.notifications, color: Colors.purple),
         title: "Notifications",
         activeColorPrimary: Colors.purple,
         inactiveColorPrimary: Colors.grey,
@@ -67,7 +67,7 @@ class _MainnavbarState extends State<mainnavbar> {
   Widget build(BuildContext context) {
     return PersistentTabView(
       context,
-      controller: PersistentTabController(initialIndex: 0),
+      controller: mainNavController, // 👈 USE GLOBAL
       screens: _buildscreen(),
       items: _navbaritems(),
       navBarHeight: 70,

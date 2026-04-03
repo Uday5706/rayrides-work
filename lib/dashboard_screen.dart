@@ -1,324 +1,9 @@
-// import 'package:flutter/material.dart';
-// import 'package:percent_indicator/percent_indicator.dart';
-// import 'package:rayride/driver_ride_history_screen.dart';
-
-// class DashboardScreen extends StatelessWidget {
-//   const DashboardScreen({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Scaffold(
-//       appBar: AppBar(
-//         backgroundColor: Colors.grey[350],
-//         title: Container(
-//           padding: EdgeInsets.all(7),
-//           child: Row(
-//             children: [
-//               Text('Rayrides dashboard',
-//                   style: TextStyle(fontWeight: FontWeight.bold)),
-//               Spacer(),
-//               CircleAvatar(
-//                 radius: 25,
-//                 backgroundColor: Colors.grey[300],
-//                 child: Icon(
-//                   Icons.person,
-//                   size: 30,
-//                   color: Colors.black,
-//                 ),
-//               ),
-//               SizedBox(width: 7),
-//               Icon(Icons.settings, size: 25, color: Colors.black),
-//             ],
-//           ),
-//         ),
-//       ),
-//       body: SingleChildScrollView(
-//         child: Column(
-//           children: [
-//             // Battery status
-//             Container(
-//               height: MediaQuery.of(context).size.height * 0.27,
-//               width: double.infinity,
-//               margin: EdgeInsets.fromLTRB(4, 0, 4, 0),
-//               padding: EdgeInsets.all(10),
-//               decoration: BoxDecoration(
-//                 gradient: LinearGradient(
-//                   colors: [
-//                     Colors.lightBlue.shade50,
-//                     Colors.lightBlue.shade100
-//                   ],
-//                   begin: Alignment.topLeft,
-//                   end: Alignment.bottomRight,
-//                 ),
-//                 boxShadow: [
-//                   BoxShadow(
-//                     color:
-//                         const Color.fromARGB(255, 93, 90, 90).withOpacity(0.5),
-//                     spreadRadius: 2,
-//                     blurRadius: 10,
-//                     offset: Offset(0, 3),
-//                   ),
-//                 ],
-//               ),
-//               child: Column(
-//                 children: [
-//                   Row(
-//                     mainAxisAlignment: MainAxisAlignment.center,
-//                     children: [
-//                       Icon(Icons.battery_charging_full,
-//                           size: 25, color: Colors.green),
-//                       SizedBox(width: 10),
-//                       Text(
-//                         'Battery Status: ',
-//                         style: TextStyle(
-//                             fontWeight: FontWeight.bold, fontSize: 20),
-//                       ),
-//                       SizedBox(width: 7),
-//                       Text(
-//                         '76%',
-//                         style: TextStyle(fontSize: 20),
-//                       ),
-//                     ],
-//                   ),
-//                   SizedBox(height: 19),
-//                   CircularPercentIndicator(
-//                     radius: 50.0,
-//                     lineWidth: 15,
-//                     animation: true,
-//                     percent: 0.76,
-//                     center: Text(
-//                       '76%',
-//                       style:
-//                           TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-//                     ),
-//                     footer: Text(
-//                       'Battery Status:Good',
-//                       style:
-//                           TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-//                     ),
-//                     circularStrokeCap: CircularStrokeCap.round,
-//                     progressColor: Colors.green,
-//                     backgroundColor: Colors.grey[300]!,
-//                   )
-//                 ],
-//               ),
-//             ),
-
-//             SizedBox(
-//               height: MediaQuery.of(context).size.height * 0.25,
-//               child: Row(
-//                 mainAxisAlignment: MainAxisAlignment.center,
-//                 children: [
-//                   Expanded(
-//                     child: Card(
-//                       shape: RoundedRectangleBorder(
-//                         borderRadius: BorderRadius.circular(15),
-//                       ),
-//                       shadowColor:
-//                           const Color.fromARGB(255, 62, 61, 61).withOpacity(0.5),
-//                       child: Container(
-//                         padding: EdgeInsets.all(10),
-//                         child: Column(
-//                           children: [
-//                             Row(
-//                               children: [
-//                                 Image.asset(
-//                                   'images/1.jpeg',
-//                                   width: 60,
-//                                   height: 60,
-//                                 ),
-//                                 SizedBox(width: 10),
-//                                 Expanded(
-//                                   child: Text(
-//                                     '₹520 Earned today',
-//                                     style: TextStyle(
-//                                       fontSize: 18,
-//                                       fontWeight: FontWeight.bold,
-//                                     ),
-//                                   ),
-//                                 ),
-//                               ],
-//                             ),
-//                             SizedBox(height: 10),
-//                             Text(
-//                               '5 Rides Completed',
-//                               style: TextStyle(
-//                                 fontSize: 16,
-//                                 color: Colors.grey[600],
-//                               ),
-//                             ),
-//                           ],
-//                         ),
-//                       ),
-//                     ),
-//                   ),
-//                   Expanded(
-//                     child: Card(
-//                       margin: EdgeInsets.all(10),
-//                       shape: RoundedRectangleBorder(
-//                         borderRadius: BorderRadius.circular(15),
-//                       ),
-//                       shadowColor:
-//                           const Color.fromARGB(255, 62, 61, 61).withOpacity(0.5),
-//                       child: Container(
-//                         padding: EdgeInsets.all(10),
-//                         child: Column(
-//                           children: [
-//                             Row(
-//                               children: [
-//                                 Image.asset(
-//                                   'images/2.png',
-//                                   width: 60,
-//                                   height: 60,
-//                                 ),
-//                                 SizedBox(width: 10),
-//                                 Expanded(
-//                                   child: Text(
-//                                     '23.4 km Driven today',
-//                                     style: TextStyle(
-//                                       fontSize: 18,
-//                                       fontWeight: FontWeight.bold,
-//                                     ),
-//                                   ),
-//                                 ),
-//                               ],
-//                             ),
-//                             SizedBox(height: 10),
-//                             Text(
-//                               'Today\'s Distance',
-//                               style: TextStyle(
-//                                 fontSize: 16,
-//                                 color: Colors.grey[600],
-//                               ),
-//                             ),
-//                           ],
-//                         ),
-//                       ),
-//                     ),
-//                   ),
-//                 ],
-//               ),
-//             ),
-
-//             Container(
-//               padding: EdgeInsets.all(10),
-//               child: Column(
-//                 children: [
-//                   Text(
-//                     'Alerts!',
-//                     style: TextStyle(
-//                       fontSize: 25,
-//                       fontWeight: FontWeight.bold,
-//                     ),
-//                   ),
-//                   SizedBox(height: 15),
-//                   buildAlertTile('Check Tire pressure'),
-//                   SizedBox(height: 15),
-//                   buildAlertTile('Battery Below 25%'),
-//                 ],
-//               ),
-//             ),
-
-//             Padding(
-//               padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10),
-//               child: SizedBox(
-//                 width: double.infinity,
-//                 height: 55,
-//                 child: ElevatedButton(
-//                   style: ElevatedButton.styleFrom(
-//                     backgroundColor: Colors.blue,
-//                     shape: RoundedRectangleBorder(
-//                       borderRadius: BorderRadius.circular(12),
-//                     ),
-//                   ),
-//                   onPressed: () {
-
-//                     print("View Full Report Pressed");
-//                   },
-//                   child: Text(
-//                     'View Full Report',
-//                     style: TextStyle(
-//                       fontSize: 18,
-//                       fontWeight: FontWeight.bold,
-//                       color: Colors.white,
-//                     ),
-//                   ),
-//                 ),
-//               ),
-//             ),
-
-//             Padding(
-//               padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10),
-//               child: SizedBox(
-//                 width: double.infinity,
-//                 height: 55,
-//                 child: ElevatedButton(
-//                   style: ElevatedButton.styleFrom(
-//                     backgroundColor: Colors.blue,
-//                     shape: RoundedRectangleBorder(
-//                       borderRadius: BorderRadius.circular(12),
-//                     ),
-//                   ),
-//                   onPressed: () {
-//                     Navigator.push(context, MaterialPageRoute(builder:  (context) => DriverRideHistoryScreen()));
-
-//                   },
-//                   child: Text(
-//                     'View Ride History',
-//                     style: TextStyle(
-//                       fontSize: 18,
-//                       fontWeight: FontWeight.bold,
-//                       color: Colors.white,
-//                     ),
-//                   ),
-//                 ),
-//               ),
-//             )
-//           ],
-//         ),
-//       ),
-//     );
-//   }
-
-//   Widget buildAlertTile(String title) {
-//     return Container(
-//       decoration: BoxDecoration(
-//         border: Border.all(color: Colors.amber),
-//         gradient: LinearGradient(
-//           colors: [Colors.amber.shade100, Colors.amber.shade200],
-//           begin: Alignment.topLeft,
-//           end: Alignment.bottomRight,
-//         ),
-//         borderRadius: BorderRadius.circular(10),
-//       ),
-//       padding: EdgeInsets.all(10),
-//       child: Row(
-//         children: [
-//           Icon(Icons.warning_amber_outlined, color: Colors.amber),
-//           SizedBox(width: 10),
-//           Expanded(
-//             child: Text(
-//               title,
-//               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-//             ),
-//           ),
-//           ElevatedButton(onPressed: () {}, child: Text('View')),
-//           SizedBox(width: 5),
-//           Icon(Icons.cancel_outlined, color: Colors.white),
-//         ],
-//       ),
-//     );
-//   }
-// }
-
-import 'dart:convert';
-
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:hive/hive.dart';
-import 'package:http/http.dart' as http;
-import 'package:percent_indicator/percent_indicator.dart';
-import 'package:rayride/driver_ride_history_screen.dart';
 import 'package:rayride/role_selection_screen.dart';
+
+import 'driver_map_tracking_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -330,7 +15,11 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   double batteryLevel = 0.0;
   int totalCompletedRides = 0;
-  double totalEarnings = 0.0;
+  double todayEarnings = 0.0; // Changed to Today's Earnings
+  List<Map<String, dynamic>> rideHistory = [];
+  double todayCO2 = 0.0;
+  Map<String, dynamic>? activeRide;
+  bool isLoading = true;
 
   @override
   void initState() {
@@ -339,45 +28,74 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _backToRoleSelection(BuildContext context) {
-    // Use pushAndRemoveUntil to clear the entire navigation history
     Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-      MaterialPageRoute(
-          builder: (context) =>
-              const roleSelection() // Replace with your actual class name
-          ),
-      (Route<dynamic> route) =>
-          false, // This condition removes all previous routes
+      MaterialPageRoute(builder: (context) => const roleSelection()),
+      (Route<dynamic> route) => false,
     );
   }
 
   Future<void> fetchDashboardData() async {
-    final userBox = await Hive.openBox('userBox');
-    final userId = userBox.get('userId') ?? 'demoDriver';
-
+    setState(() => isLoading = true);
     try {
-      // 🔋 Fetch battery level
-      final userResponse =
-          await http.get(Uri.parse('http://localhost:3000/api/users/$userId'));
-      if (userResponse.statusCode == 200) {
-        final user = jsonDecode(userResponse.body);
-        batteryLevel = (user['batteryLevel'] ?? 0) / 100;
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        setState(() => isLoading = false);
+        return;
       }
 
-      // 🚗 Fetch driver rides
-      final ridesResponse = await http.get(Uri.parse(
-          'http://localhost:3000/api/users/$userId/rides?role=driver'));
-      if (ridesResponse.statusCode == 200) {
-        final rides = jsonDecode(ridesResponse.body);
-        final completedRides =
-            rides.where((ride) => ride['status'] == 'accepted').toList();
-        totalCompletedRides = completedRides.length;
-        totalEarnings =
-            completedRides.fold(0.0, (sum, ride) => sum + (ride['fare'] ?? 0));
+      final driverUid = user.uid;
+
+      final rideSnapshot = await FirebaseFirestore.instance
+          .collection('shared_trips')
+          .where('driver_id', isEqualTo: driverUid)
+          .orderBy('published_at', descending: true)
+          .get();
+
+      List<Map<String, dynamic>> tempHistory = [];
+      todayCO2 = 0.0;
+      todayEarnings = 0.0;
+      activeRide = null;
+      int completedCount = 0;
+
+      final DateTime now = DateTime.now();
+
+      for (var doc in rideSnapshot.docs) {
+        Map<String, dynamic> rideData = {
+          ...doc.data(),
+          'tripId': doc.id,
+        };
+
+        // 🟢 INSTANT MATH: No subcollection reads needed anymore!
+        double shiftEarnings = (rideData['total_earned'] ?? 0.0).toDouble();
+
+        tempHistory.add(rideData);
+
+        if (rideData['status'] == 'active') {
+          activeRide = rideData;
+        } else if (rideData['status'] == 'completed') {
+          completedCount++;
+
+          if (rideData['completed_at'] != null) {
+            DateTime completedDate =
+                (rideData['completed_at'] as Timestamp).toDate();
+            if (completedDate.year == now.year &&
+                completedDate.month == now.month &&
+                completedDate.day == now.day) {
+              todayCO2 += (rideData['carbon_saved_kg'] ?? 0.0);
+              todayEarnings += shiftEarnings;
+            }
+          }
+        }
       }
 
-      setState(() {});
+      setState(() {
+        rideHistory = tempHistory;
+        totalCompletedRides = completedCount;
+        isLoading = false;
+      });
     } catch (e) {
-      print("❌ Error fetching dashboard data: $e");
+      debugPrint("❌ Error fetching dashboard data: $e");
+      setState(() => isLoading = false);
     }
   }
 
@@ -386,183 +104,321 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final batteryPercentText = '${(batteryLevel * 100).toInt()}%';
 
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.grey[350],
-        title: Row(
-          children: [
-            Text('Rayrides dashboard',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            Spacer(),
-            CircleAvatar(
-              radius: 25,
-              backgroundColor: Colors.grey[300],
-              child: Icon(Icons.person, size: 30, color: Colors.black),
-            ),
-            SizedBox(width: 7),
-            Icon(Icons.settings, size: 25, color: Colors.black),
-          ],
-        ),
-      ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            // 🔋 Battery status
-            Container(
-              height: MediaQuery.of(context).size.height * 0.27,
-              width: double.infinity,
-              margin: EdgeInsets.fromLTRB(4, 0, 4, 0),
-              padding: EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.lightBlue.shade50, Colors.lightBlue.shade100],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+      backgroundColor: Colors.grey[100],
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator(color: Colors.black))
+          : RefreshIndicator(
+              onRefresh: fetchDashboardData,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(20, 60, 20, 30),
+                      width: double.infinity,
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFF0F2027), Color(0xFF2C5364)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.vertical(
+                          bottom: Radius.circular(30),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            "Welcome Back 👋",
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 14),
+                          ),
+                          SizedBox(height: 5),
+                          Text(
+                            "Shared Driver Dashboard",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 26,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    _buildCO2Card(),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildStatCardModern(
+                            title: "₹${todayEarnings.toStringAsFixed(0)}",
+                            subtitle: "Today's Earnings",
+                            icon: Icons.currency_rupee,
+                            color: Colors.green,
+                          ),
+                        ),
+                        Expanded(
+                          child: _buildStatCardModern(
+                            title: "$totalCompletedRides",
+                            subtitle: "Total Shifts",
+                            icon: Icons.directions_car,
+                            color: Colors.blue,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    _buildBatteryCard(batteryPercentText),
+                    const SizedBox(height: 25),
+                    _buildResumeRideButton(),
+                    const SizedBox(height: 20),
+                    _buildRideHistorySection(),
+                    const SizedBox(height: 30),
+                    _buildButton(
+                        "Log Out", () => _backToRoleSelection(context)),
+                    const SizedBox(height: 30),
+                  ],
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color:
-                        const Color.fromARGB(255, 93, 90, 90).withOpacity(0.5),
-                    spreadRadius: 2,
-                    blurRadius: 10,
-                    offset: Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.battery_charging_full,
-                          size: 25, color: Colors.green),
-                      SizedBox(width: 10),
-                      Text('Battery Status: ',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 20)),
-                      SizedBox(width: 7),
-                      Text(batteryPercentText, style: TextStyle(fontSize: 20)),
-                    ],
-                  ),
-                  SizedBox(height: 19),
-                  CircularPercentIndicator(
-                    radius: 50.0,
-                    lineWidth: 15,
-                    animation: true,
-                    percent: batteryLevel,
-                    center: Text(batteryPercentText,
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 20)),
-                    footer: Text('Battery Status: Good',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 15)),
-                    circularStrokeCap: CircularStrokeCap.round,
-                    progressColor: Colors.green,
-                    backgroundColor: Colors.grey[300]!,
-                  )
-                ],
               ),
             ),
-
-            // 💰 Earnings and Rides
-            SizedBox(
-              height: MediaQuery.of(context).size.height * 0.25,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _buildStatCard(
-                        '₹${totalEarnings.toStringAsFixed(2)} Earned',
-                        '$totalCompletedRides Rides Completed',
-                        'images/1.jpeg'),
-                  ),
-                  Expanded(
-                    child: _buildStatCard('23.4 km Driven Today',
-                        'Today\'s Distance', 'images/2.png'),
-                  ),
-                ],
-              ),
-            ),
-
-            // ⚠️ Alerts
-            Padding(
-              padding: EdgeInsets.all(10),
-              child: Column(
-                children: [
-                  Text('Alerts!',
-                      style:
-                          TextStyle(fontSize: 25, fontWeight: FontWeight.bold)),
-                  SizedBox(height: 15),
-                  buildAlertTile('Check Tire pressure'),
-                  SizedBox(height: 15),
-                  buildAlertTile('Battery Below 25%'),
-                ],
-              ),
-            ),
-
-            // 🔘 Buttons
-            _buildButton('Log Out', () => _backToRoleSelection(context)),
-            _buildButton('View Ride History', () {
-              Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => DriverRideHistoryScreen()));
-            }),
-          ],
-        ),
-      ),
     );
   }
 
-  Widget _buildStatCard(String title, String subtitle, String imagePath) {
-    return Card(
-      margin: EdgeInsets.all(10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      shadowColor: Colors.grey.withOpacity(0.5),
-      child: Container(
-        padding: EdgeInsets.all(10),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Image.asset(imagePath, width: 60, height: 60),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(title,
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
-            SizedBox(height: 10),
-            Text(subtitle,
-                style: TextStyle(fontSize: 16, color: Colors.grey[600])),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget buildAlertTile(String title) {
+  Widget _buildCO2Card() {
     return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.amber),
-        gradient: LinearGradient(
-          colors: [Colors.amber.shade100, Colors.amber.shade200],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+        gradient: const LinearGradient(
+          colors: [Color(0xFF00C853), Color(0xFF1B5E20)],
         ),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      padding: EdgeInsets.all(10),
-      child: Row(
-        children: [
-          Icon(Icons.warning_amber_outlined, color: Colors.amber),
-          SizedBox(width: 10),
-          Expanded(
-              child: Text(title,
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
-          ElevatedButton(onPressed: () {}, child: Text('View')),
-          SizedBox(width: 5),
-          Icon(Icons.cancel_outlined, color: Colors.white),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.green.withOpacity(0.3),
+            blurRadius: 12,
+          )
         ],
       ),
+      child: Row(
+        children: [
+          const Icon(Icons.eco, color: Colors.white, size: 40),
+          const SizedBox(width: 15),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "CO₂ Saved Today",
+                style: TextStyle(color: Colors.white70),
+              ),
+              Text(
+                "${todayCO2.toStringAsFixed(2)} kg",
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatCardModern({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.2),
+            blurRadius: 10,
+          )
+        ],
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 30, color: color),
+          const SizedBox(height: 10),
+          Text(title,
+              style:
+                  const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 5),
+          Text(subtitle,
+              style: const TextStyle(color: Colors.grey, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBatteryCard(String percentText) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(color: Colors.grey.withOpacity(0.2), blurRadius: 10)
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.battery_charging_full,
+              size: 40, color: Colors.green),
+          const SizedBox(width: 20),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("Battery Level"),
+              Text(
+                percentText,
+                style:
+                    const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+            ],
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResumeRideButton() {
+    if (activeRide == null) return const SizedBox();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: SizedBox(
+        width: double.infinity,
+        height: 55,
+        child: ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.orangeAccent,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          ),
+          icon: const Icon(Icons.map, color: Colors.white),
+          label: const Text(
+            "Resume Active Route",
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => DriverMapTrackingScreen(rideData: activeRide!),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRideHistorySection() {
+    if (rideHistory.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(20),
+        child: Text("No shared routes published yet."),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(color: Colors.grey.withOpacity(0.2), blurRadius: 10)
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Carpool Shift History",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 15),
+          ...rideHistory.map((ride) {
+            return _buildRideTile(ride);
+          }).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRideTile(dynamic ride) {
+    // 🟢 Read directly from the array we created during the ride
+    List<dynamic> passengers = ride['completed_passengers'] ?? [];
+    double shiftEarnings = (ride['total_earned'] ?? 0.0).toDouble();
+    bool isCompleted = ride['status'] == 'completed';
+
+    return ExpansionTile(
+      leading: const Icon(Icons.route, color: Colors.blueAccent),
+      title: Text(ride['drop_name'] ?? 'Custom Route',
+          style: const TextStyle(fontWeight: FontWeight.bold)),
+      subtitle: Text(
+          isCompleted
+              ? 'Shift Ended • ₹${shiftEarnings.toStringAsFixed(0)}'
+              : 'Driving Now • ₹${shiftEarnings.toStringAsFixed(0)} earned so far',
+          style: TextStyle(
+              color: isCompleted ? Colors.grey[700] : Colors.green,
+              fontWeight: FontWeight.w600)),
+      children: [
+        ListTile(
+          dense: true,
+          leading: const Icon(Icons.eco, color: Colors.green, size: 20),
+          title: Text(
+              "CO₂ Saved: ${(ride['carbon_saved_kg'] ?? 0).toStringAsFixed(2)} kg"),
+        ),
+        ListTile(
+          dense: true,
+          leading: const Icon(Icons.my_location, color: Colors.blue, size: 20),
+          title:
+              Text("Shift Start: ${ride['start_name'] ?? 'Current Location'}"),
+        ),
+        const Divider(),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text("Completed Journeys:",
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.grey))),
+        ),
+        if (passengers.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Text("No passengers dropped off yet."),
+          )
+        else
+          ...passengers.map((p) {
+            return ListTile(
+              dense: true,
+              leading:
+                  const Icon(Icons.check_circle, color: Colors.green, size: 20),
+              title: Text("Passenger (${p['seats']} seats)"),
+              subtitle: const Text("Successfully Dropped Off"),
+              trailing: Text("+ ₹${(p['fare'] ?? 0).toStringAsFixed(0)}",
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.green)),
+            );
+          }).toList(),
+        const SizedBox(height: 10),
+      ],
     );
   }
 
@@ -574,14 +430,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         height: 55,
         child: ElevatedButton(
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.blue,
+            backgroundColor: Colors.black,
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
           onPressed: onPressed,
           child: Text(label,
-              style: TextStyle(
-                  fontSize: 18,
+              style: const TextStyle(
+                  fontSize: 16,
                   fontWeight: FontWeight.bold,
                   color: Colors.white)),
         ),
