@@ -65,15 +65,17 @@ class _MainnavbarState extends State<mainnavbar> {
 
   @override
   Widget build(BuildContext context) {
-    return PersistentTabView(
-      context,
-      controller: mainNavController, // 👈 USE GLOBAL
-      screens: _buildscreen(),
-      items: _navbaritems(),
-      navBarHeight: 70,
-      confineToSafeArea: true,
-      backgroundColor: Colors.white70,
-      navBarStyle: NavBarStyle.style6,
+    return SafeArea(
+      child: PersistentTabView(
+        context,
+        controller: mainNavController, // 👈 USE GLOBAL
+        screens: _buildscreen(),
+        items: _navbaritems(),
+        navBarHeight: 70,
+        confineToSafeArea: true,
+        backgroundColor: Colors.white70,
+        navBarStyle: NavBarStyle.style6,
+      ),
     );
   }
 }

@@ -81,22 +81,14 @@ class _WalletScreenState extends State<WalletScreen> {
   }
 
   Widget _buildHeader() {
+    final user = FirebaseAuth.instance.currentUser;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: primaryGreen,
-        borderRadius: const BorderRadius.only(
-          bottomLeft: Radius.circular(30),
-          bottomRight: Radius.circular(30),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: primaryGreen.withOpacity(0.3),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          )
-        ],
+        // ... (keep your existing decoration)
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -113,12 +105,34 @@ class _WalletScreenState extends State<WalletScreen> {
             ],
           ),
           const SizedBox(height: 25),
-          Text('₹${balance.toStringAsFixed(2)}',
-              style: GoogleFonts.poppins(
-                fontSize: 36,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              )),
+
+          // 🟢 STREAM BUILDER ADDED HERE
+          if (user != null)
+            StreamBuilder<DocumentSnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('wallets')
+                  .doc(user.uid)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                // Default to 0.0 while loading or if no data
+                double liveBalance = 0.0;
+
+                if (snapshot.hasData && snapshot.data!.exists) {
+                  liveBalance = (snapshot.data!.data()
+                              as Map<String, dynamic>?)?['balance']
+                          ?.toDouble() ??
+                      0.0;
+                }
+
+                return Text('₹${liveBalance.toStringAsFixed(2)}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 36,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ));
+              },
+            ),
+
           const SizedBox(height: 4),
           Text('Available Balance (Penalties & Extras)',
               style: GoogleFonts.poppins(

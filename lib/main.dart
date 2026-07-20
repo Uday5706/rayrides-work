@@ -38,6 +38,43 @@ void main() async {
   runApp(
     MaterialApp(
       debugShowCheckedModeBanner: false,
+      // themeMode: ThemeMode.system,
+      //
+      // // 2. Define the Light Theme (Dark Green Primary)
+      // theme: ThemeData(
+      //   brightness: Brightness.light,
+      //   primaryColor: Colors.green[800], // Dark Green
+      //   scaffoldBackgroundColor: Colors.grey[50],
+      //   appBarTheme: AppBarTheme(
+      //     backgroundColor: Colors.green[800],
+      //     foregroundColor: Colors.white, // Text color on AppBar
+      //   ),
+      //   elevatedButtonTheme: ElevatedButtonThemeData(
+      //     style: ElevatedButton.styleFrom(
+      //       backgroundColor: Colors.green[800],
+      //       foregroundColor: Colors.white,
+      //     ),
+      //   ),
+      // ),
+      //
+      // // 3. Define the Dark Theme (True Black/Dark Grey with Green accents)
+      // darkTheme: ThemeData(
+      //   brightness: Brightness.dark,
+      //   primaryColor: Colors
+      //       .green[600], // Slightly lighter green for contrast in dark mode
+      //   scaffoldBackgroundColor:
+      //       const Color(0xFF121212), // Material standard dark bg
+      //   appBarTheme: const AppBarTheme(
+      //     backgroundColor: Color(0xFF1E1E1E),
+      //     foregroundColor: Colors.white,
+      //   ),
+      //   elevatedButtonTheme: ElevatedButtonThemeData(
+      //     style: ElevatedButton.styleFrom(
+      //       backgroundColor: Colors.green[700],
+      //       foregroundColor: Colors.white,
+      //     ),
+      //   ),
+      // ),
       home: loginscreen(),
       // home: LiveRideTrackingScreen(rideId: "TEST_RIDE_001"),
     ),

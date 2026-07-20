@@ -557,14 +557,19 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
         }
 
         // Compensate Driver Wallet immediately
+        // ✅ ADD THIS: Create an unpaid debt in the escrow ledger
         if (penaltyAmount > 0) {
-          transaction.set(
-              driverWalletRef,
-              {
-                'balance': FieldValue.increment(penaltyAmount),
-                'last_updated': FieldValue.serverTimestamp(),
-              },
-              SetOptions(merge: true));
+          DocumentReference ledgerRef =
+              FirebaseFirestore.instance.collection('penalty_ledgers').doc();
+          transaction.set(ledgerRef, {
+            'rider_id': passengerId,
+            'driver_id': user.uid,
+            'trip_id': _tripId,
+            'amount': penaltyAmount,
+            'reason': 'driver_cancelled_no_show',
+            'status': 'unpaid',
+            'created_at': FieldValue.serverTimestamp(),
+          });
         }
       });
 
@@ -638,16 +643,19 @@ class _DriverMapTrackingScreenState extends State<DriverMapTrackingScreen>
         batch.update(riderRef, riderUpdates);
       }
 
+// ✅ NEW WAY: Create Debt Ledger (Escrow)
       if (waitingFee > 0) {
-        DocumentReference walletRef =
-            FirebaseFirestore.instance.collection('wallets').doc(user.uid);
-        batch.set(
-            walletRef,
-            {
-              'balance': FieldValue.increment(waitingFee),
-              'last_updated': FieldValue.serverTimestamp(),
-            },
-            SetOptions(merge: true));
+        DocumentReference ledgerRef =
+            FirebaseFirestore.instance.collection('penalty_ledgers').doc();
+        batch.set(ledgerRef, {
+          'rider_id': passengerId,
+          'driver_id': user.uid,
+          'trip_id': _tripId,
+          'amount': waitingFee,
+          'reason': 'wait_time',
+          'status': 'unpaid',
+          'created_at': FieldValue.serverTimestamp(),
+        });
       }
 
       await batch.commit();

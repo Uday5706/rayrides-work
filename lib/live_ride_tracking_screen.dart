@@ -274,18 +274,20 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
 
             transaction.update(riderRef, riderUpdates);
 
-            // Compensate the Driver instantly
+            // ✅ NEW WAY: Create Debt Ledger (Escrow)
             if (penaltyAmount > 0 && driverId.isNotEmpty) {
-              DocumentReference driverWalletRef = FirebaseFirestore.instance
-                  .collection('wallets')
-                  .doc(driverId);
-              transaction.set(
-                  driverWalletRef,
-                  {
-                    'balance': FieldValue.increment(penaltyAmount),
-                    'last_updated': FieldValue.serverTimestamp(),
-                  },
-                  SetOptions(merge: true));
+              DocumentReference ledgerRef = FirebaseFirestore.instance
+                  .collection('penalty_ledgers')
+                  .doc();
+              transaction.set(ledgerRef, {
+                'rider_id': user.uid,
+                'driver_id': driverId,
+                'trip_id': _tripId,
+                'amount': penaltyAmount,
+                'reason': 'rider_cancelled',
+                'status': 'unpaid',
+                'created_at': FieldValue.serverTimestamp(),
+              });
             }
           }
         }

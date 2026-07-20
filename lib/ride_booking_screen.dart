@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // 🟢 Required for Profile Checks
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_google_places_hoc081098/flutter_google_places_hoc081098.dart';
@@ -13,6 +13,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:google_maps_webservice/places.dart' as gm_webservice;
 
+// 🟢 IMPORT YOUR SERVICES
+import '../services/payment_service.dart';
+import '../services/user_service.dart';
 import 'live_ride_tracking_screen.dart';
 
 class RideBookingScreen extends StatefulWidget {
@@ -39,8 +42,12 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
   List<LatLng> _polylineCoordinates = [];
   bool _isSearching = false;
 
-  // 🟢 NEW: Rider Profile State
-  double _negativeBalance = 0.0;
+  // 🟢 SERVICES
+  final PaymentService _paymentService = PaymentService();
+  final UserService _userService = UserService();
+  String? _currentUserId;
+
+  // Rider Profile State (Rating only, balance is handled by Stream)
   double _riderRating = 5.0;
   bool _isLoadingProfile = true;
 
@@ -54,63 +61,43 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
   void initState() {
     super.initState();
     _determinePosition();
-    _fetchRiderProfile(); // 🟢 Fetch penalties and ratings on load
-  }
 
-  @override
-  void dispose() {
-    super.dispose();
-  }
-
-  // 🟢 NEW: Fetch the user's profile to check for penalties
-  Future<void> _fetchRiderProfile() async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        final doc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get();
-        if (doc.exists && mounted) {
-          setState(() {
-            _negativeBalance =
-                (doc.data()?['negative_balance'] ?? 0.0).toDouble();
-            _riderRating = (doc.data()?['rating'] ?? 5.0).toDouble();
-            _isLoadingProfile = false;
-          });
-        } else {
-          if (mounted) setState(() => _isLoadingProfile = false);
-        }
-      } else {
-        if (mounted) setState(() => _isLoadingProfile = false);
-      }
-    } catch (e) {
-      debugPrint("Error fetching profile: $e");
+    // 🟢 Initialize Services
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      _currentUserId = user.uid;
+      _paymentService.initialize(_currentUserId!);
+      _fetchRiderRating();
+    } else {
       if (mounted) setState(() => _isLoadingProfile = false);
     }
   }
 
-  // 🟢 NEW: Simulated Payment function to clear penalty
-  Future<void> _payPenalty() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+  @override
+  void dispose() {
+    // 🟢 Clean up Razorpay to prevent memory leaks
+    _paymentService.dispose();
+    super.dispose();
+  }
 
+  // 🟢 Fetch ONLY the rating once on load. Balance is handled live via Stream.
+  Future<void> _fetchRiderRating() async {
     try {
-      // Simulate calling Razorpay/Stripe here, then clear the database flag
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .update({
-        'negative_balance': 0.0,
-      });
-
-      setState(() {
-        _negativeBalance = 0.0;
-      });
-
-      _showSnackBar("Penalty paid! You can now book rides.", Colors.green);
+      if (_currentUserId != null) {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(_currentUserId)
+            .get();
+        if (doc.exists && mounted) {
+          setState(() {
+            _riderRating = (doc.data()?['rating'] ?? 5.0).toDouble();
+            _isLoadingProfile = false;
+          });
+        }
+      }
     } catch (e) {
-      _showSnackBar("Payment failed. Please try again.", Colors.red);
+      debugPrint("Error fetching profile: $e");
+      if (mounted) setState(() => _isLoadingProfile = false);
     }
   }
 
@@ -342,35 +329,30 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
     }
   }
 
-  // 🟢 UPDATED: Booking Logic now uses pending_approval and attaches Rating
   Future<void> _bookSelectedTrip(Map<String, dynamic> tripData) async {
     final String tripId = tripData['trip_id'];
 
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
+    if (_currentUserId == null) {
       _showSnackBar("Please log in first", Colors.red);
       return;
     }
-    final String passId = user.uid; // 🟢 We now strictly use the UID
 
     try {
-      // 🟢 1. No atomic transaction deducting seats here!
-      // We just push the document with a 'pending_approval' flag.
       DocumentReference tripRef =
           FirebaseFirestore.instance.collection('shared_trips').doc(tripId);
       DocumentReference passengerRef =
-          tripRef.collection('passengers').doc(passId);
+          tripRef.collection('passengers').doc(_currentUserId);
 
       await passengerRef.set({
-        'passenger_id': passId,
+        'passenger_id': _currentUserId,
         'pickup_lat': _currentPosition!.latitude,
         'pickup_lng': _currentPosition!.longitude,
         'drop_lat': _dropLatLng!.latitude,
         'drop_lng': _dropLatLng!.longitude,
         'seats_booked': _requestedSeats,
         'fare': tripData['calculated_fare'],
-        'status': 'pending_approval', // Driver must accept this
-        'rider_rating': _riderRating, // Driver sees this before accepting
+        'status': 'pending_approval',
+        'rider_rating': _riderRating,
         'created_at': FieldValue.serverTimestamp(),
       });
 
@@ -380,7 +362,7 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
       if (mounted) {
         Map<String, dynamic> ridePayload = {
           'trip_id': tripId,
-          'passenger_id': passId,
+          'passenger_id': _currentUserId,
           'driver_name': tripData['driver_name'],
           'vehicle_number': tripData['vehicle_number'] ?? "Carpool Vehicle",
           'pickup_lat': _currentPosition!.latitude,
@@ -481,7 +463,7 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
           ),
           _buildTopOverlay(),
 
-          // 🟢 Conditionally show the booking tools or the penalty block
+          // 🟢 Reactive StreamBuilder Bottom Overlay
           _buildBottomOverlay(),
 
           if (_isSearching)
@@ -517,7 +499,10 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
     );
   }
 
+  // 🟢 REWRITTEN: StreamBuilder dynamically checks balance
   Widget _buildBottomOverlay() {
+    if (_currentUserId == null) return const SizedBox.shrink();
+
     return Positioned(
       bottom: 0,
       left: 0,
@@ -531,20 +516,32 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
             boxShadow: const [
               BoxShadow(color: Colors.black12, blurRadius: 20)
             ]),
-
-        // 🟢 Check if loading, blocked by penalty, or normal
         child: _isLoadingProfile
             ? const SizedBox(
                 height: 100, child: Center(child: CircularProgressIndicator()))
-            : _negativeBalance > 0
-                ? _buildPenaltyUI()
-                : _buildNormalBookingUI(),
+            : StreamBuilder<double>(
+                stream: _userService.streamNegativeBalance(_currentUserId!),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const SizedBox(
+                        height: 100,
+                        child: Center(child: CircularProgressIndicator()));
+                  }
+
+                  final double currentNegativeBalance = snapshot.data ?? 0.0;
+
+                  // 🟢 Switch UI instantly based on streamed value
+                  return currentNegativeBalance > 0
+                      ? _buildPenaltyUI(currentNegativeBalance)
+                      : _buildNormalBookingUI();
+                },
+              ),
       ),
     );
   }
 
-  // 🟢 NEW: Penalty UI
-  Widget _buildPenaltyUI() {
+  // 🟢 REWRITTEN: Takes balance as argument, triggers Payment Service
+  Widget _buildPenaltyUI(double balance) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -555,7 +552,7 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
                 fontSize: 18, fontWeight: FontWeight.bold, color: Colors.red)),
         const SizedBox(height: 5),
         Text(
-            "You have an unpaid penalty of ₹${_negativeBalance.toStringAsFixed(0)} for making a driver wait.",
+            "You have an unpaid penalty of ₹${balance.toStringAsFixed(0)} for making a driver wait.",
             textAlign: TextAlign.center),
         const SizedBox(height: 15),
         SizedBox(
@@ -566,8 +563,29 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
                 backgroundColor: Colors.black,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12))),
-            onPressed: _payPenalty,
-            child: Text("Pay ₹${_negativeBalance.toStringAsFixed(0)} to Unlock",
+            onPressed: () async {
+              try {
+                // Show a quick loading dialog so the user knows the app registered the tap
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (context) => const Center(
+                      child: CircularProgressIndicator(color: Colors.green)),
+                );
+
+                await _paymentService.initiateClearBalance();
+
+                // Close the loading dialog once Razorpay responds or handles the open request
+                if (context.mounted) Navigator.pop(context);
+              } catch (e) {
+                if (context.mounted) {
+                  Navigator.pop(context); // Close loading dialog
+                  _showSnackBar(
+                      "Could not initialize payment wrapper: $e", Colors.red);
+                }
+              }
+            },
+            child: Text("Pay ₹${balance.toStringAsFixed(0)} to Unlock",
                 style: const TextStyle(color: Colors.white, fontSize: 16)),
           ),
         )
