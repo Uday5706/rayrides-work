@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:persistent_bottom_nav_bar/persistent_bottom_nav_bar.dart';
 import 'package:rayride/Notification_screen.dart';
 import 'package:rayride/dashboard_screen.dart';
-import 'package:rayride/driver_map_tracking_screen.dart';
 import 'package:rayride/fare_offer_screen.dart';
 import 'package:rayride/wallet_screen.dart';
+
+// 🟢 Import your global theme palette
+import 'core/app_theme.dart';
 
 /// ✅ GLOBAL CONTROLLER
 final PersistentTabController mainNavController =
@@ -20,62 +22,78 @@ class mainnavbar extends StatefulWidget {
 class _MainnavbarState extends State<mainnavbar> {
   List<Widget> _buildscreen() {
     return [
-      DashboardScreen(),
-      fareOfferScreen(),
-      DriverMapTrackingScreen(rideData: {}),
-      WalletScreen(),
-      Notificationscreen(),
+      const DashboardScreen(),
+      const fareOfferScreen(),
+      const WalletScreen(),
+      const Notificationscreen(),
     ];
   }
 
-  List<PersistentBottomNavBarItem> _navbaritems() {
+  List<PersistentBottomNavBarItem> _navbaritems(bool isDark) {
+    final Color activeColor = isDark ? AppTheme.softMint : AppTheme.mutedPine;
+    final Color inactiveColor =
+        isDark ? AppTheme.dustySage.withOpacity(0.6) : AppTheme.dustySage;
+
     return [
       PersistentBottomNavBarItem(
-        icon: const Icon(Icons.dashboard),
+        icon: const Icon(Icons.dashboard_rounded),
         title: "Dashboard",
-        activeColorPrimary: Colors.blue,
-        inactiveColorPrimary: Colors.grey,
+        activeColorPrimary: activeColor,
+        inactiveColorPrimary: inactiveColor,
       ),
       PersistentBottomNavBarItem(
-        icon: const Icon(Icons.whatshot, color: Colors.redAccent),
-        title: "Fare Offers",
-        activeColorPrimary: Colors.redAccent,
-        inactiveColorPrimary: Colors.grey,
+        icon: const Icon(Icons.local_fire_department_rounded),
+        title: "Offers",
+        activeColorPrimary: activeColor,
+        inactiveColorPrimary: inactiveColor,
       ),
+      // 🟢 MAP TAB REMOVED - NOW A 4-TAB LAYOUT
       PersistentBottomNavBarItem(
-        icon: const Icon(Icons.map, color: Colors.green),
-        title: "Map",
-        activeColorPrimary: Colors.green,
-        inactiveColorPrimary: Colors.grey,
-      ),
-      PersistentBottomNavBarItem(
-        icon: const Icon(Icons.account_balance_wallet, color: Colors.orange),
+        icon: const Icon(Icons.account_balance_wallet_rounded),
         title: "Wallet",
-        activeColorPrimary: Colors.orange,
-        inactiveColorPrimary: Colors.grey,
+        activeColorPrimary: activeColor,
+        inactiveColorPrimary: inactiveColor,
       ),
       PersistentBottomNavBarItem(
-        icon: const Icon(Icons.notifications, color: Colors.purple),
-        title: "Notifications",
-        activeColorPrimary: Colors.purple,
-        inactiveColorPrimary: Colors.grey,
+        icon: const Icon(Icons.notifications_rounded),
+        title: "Alerts",
+        activeColorPrimary: activeColor,
+        inactiveColorPrimary: inactiveColor,
       ),
     ];
   }
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: PersistentTabView(
-        context,
-        controller: mainNavController, // 👈 USE GLOBAL
-        screens: _buildscreen(),
-        items: _navbaritems(),
-        navBarHeight: 70,
-        confineToSafeArea: true,
-        backgroundColor: Colors.white70,
-        navBarStyle: NavBarStyle.style6,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return PersistentTabView(
+      context,
+      controller: mainNavController,
+      screens: _buildscreen(),
+      items: _navbaritems(isDark),
+      navBarHeight: 70,
+      padding: const EdgeInsets.only(
+        left: 10,
+        right: 10,
       ),
+      confineToSafeArea: true,
+      handleAndroidBackButtonPress: true,
+      resizeToAvoidBottomInset: true,
+      backgroundColor: isDark ? AppTheme.deepForest : AppTheme.white,
+      decoration: NavBarDecoration(
+        colorBehindNavBar: isDark ? AppTheme.deepForest : AppTheme.white,
+        boxShadow: [
+          BoxShadow(
+            color: isDark
+                ? Colors.black.withOpacity(0.4)
+                : AppTheme.dustySage.withOpacity(0.2),
+            blurRadius: 20,
+            offset: const Offset(0, -5),
+          )
+        ],
+      ),
+      navBarStyle: NavBarStyle.style12,
     );
   }
 }

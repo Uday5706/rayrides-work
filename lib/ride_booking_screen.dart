@@ -1,21 +1,22 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:flutter_google_places_hoc081098/flutter_google_places_hoc081098.dart';
-import 'package:flutter_google_places_hoc081098/google_maps_webservice_places.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart'
     as polyline;
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:google_maps_webservice/places.dart' as gm_webservice;
+import 'package:http/http.dart' as http;
 
-// 🟢 IMPORT YOUR SERVICES
 import '../services/payment_service.dart';
 import '../services/user_service.dart';
+import 'core/app_theme.dart';
 import 'live_ride_tracking_screen.dart';
 
 class RideBookingScreen extends StatefulWidget {
@@ -25,7 +26,8 @@ class RideBookingScreen extends StatefulWidget {
   _RideBookingScreenState createState() => _RideBookingScreenState();
 }
 
-class _RideBookingScreenState extends State<RideBookingScreen> {
+class _RideBookingScreenState extends State<RideBookingScreen>
+    with SingleTickerProviderStateMixin {
   GoogleMapController? _mapController;
   final TextEditingController _pickupController = TextEditingController();
   final TextEditingController _dropController = TextEditingController();
@@ -34,7 +36,6 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
   List<Map<String, dynamic>> _availableSharedTrips = [];
   double _calculatedDistanceKm = 0.0;
 
-  String _locationStatus = "Detecting current location...";
   Position? _currentPosition;
   Set<Marker> _markers = {};
   LatLng? _dropLatLng;
@@ -42,12 +43,12 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
   List<LatLng> _polylineCoordinates = [];
   bool _isSearching = false;
 
-  // 🟢 SERVICES
+  // 🟢 NEW: Tracks which field the map taps should update (Defaults to drop-off)
+  bool _isSettingPickup = false;
+
   final PaymentService _paymentService = PaymentService();
   final UserService _userService = UserService();
   String? _currentUserId;
-
-  // Rider Profile State (Rating only, balance is handled by Stream)
   double _riderRating = 5.0;
   bool _isLoadingProfile = true;
 
@@ -57,12 +58,31 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
   final String kGoogleApiKey = dotenv.env['GOOGLE_MAPS_API_KEY'] ?? "";
   final LatLng _defaultCenter = const LatLng(28.6139, 77.2090);
 
+  late AnimationController _animController;
+  late Animation<Offset> _slideTop;
+  late Animation<Offset> _slideBottom;
+
   @override
   void initState() {
     super.initState();
     _determinePosition();
 
-    // 🟢 Initialize Services
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
+    _slideTop =
+        Tween<Offset>(begin: const Offset(0, -1), end: Offset.zero).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.elasticOut),
+    );
+    _slideBottom =
+        Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.easeOutExpo),
+    );
+    _animController.forward();
+
+    themeNotifier.addListener(_updateMapStyle);
+
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       _currentUserId = user.uid;
@@ -75,12 +95,24 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
 
   @override
   void dispose() {
-    // 🟢 Clean up Razorpay to prevent memory leaks
+    themeNotifier.removeListener(_updateMapStyle);
+    _animController.dispose();
     _paymentService.dispose();
+    _pickupController.dispose();
+    _dropController.dispose();
     super.dispose();
   }
 
-  // 🟢 Fetch ONLY the rating once on load. Balance is handled live via Stream.
+  void _updateMapStyle() {
+    if (_mapController == null) return;
+    if (themeNotifier.value == ThemeMode.dark) {
+      _mapController!.setMapStyle(
+          '[{"elementType":"geometry","stylers":[{"color":"#212121"}]},{"elementType":"labels.icon","stylers":[{"visibility":"off"}]},{"elementType":"labels.text.fill","stylers":[{"color":"#757575"}]},{"elementType":"labels.text.stroke","stylers":[{"color":"#212121"}]},{"featureType":"administrative","elementType":"geometry","stylers":[{"color":"#757575"}]},{"featureType":"administrative.country","elementType":"labels.text.fill","stylers":[{"color":"#9e9e9e"}]},{"featureType":"administrative.land_parcel","stylers":[{"visibility":"off"}]},{"featureType":"administrative.locality","elementType":"labels.text.fill","stylers":[{"color":"#bdbdbd"}]},{"featureType":"poi","elementType":"labels.text.fill","stylers":[{"color":"#757575"}]},{"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#181818"}]},{"featureType":"poi.park","elementType":"labels.text.fill","stylers":[{"color":"#616161"}]},{"featureType":"poi.park","elementType":"labels.text.stroke","stylers":[{"color":"#1b1b1b"}]},{"featureType":"road","elementType":"geometry.fill","stylers":[{"color":"#2c2c2c"}]},{"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"#8a8a8a"}]},{"featureType":"road.arterial","elementType":"geometry","stylers":[{"color":"#373737"}]},{"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#3c3c3c"}]},{"featureType":"road.highway.controlled_access","elementType":"geometry","stylers":[{"color":"#4e4e4e"}]},{"featureType":"road.local","elementType":"labels.text.fill","stylers":[{"color":"#616161"}]},{"featureType":"transit","elementType":"labels.text.fill","stylers":[{"color":"#757575"}]},{"featureType":"water","elementType":"geometry","stylers":[{"color":"#000000"}]},{"featureType":"water","elementType":"labels.text.fill","stylers":[{"color":"#3d3d3d"}]}]');
+    } else {
+      _mapController!.setMapStyle(null);
+    }
+  }
+
   Future<void> _fetchRiderRating() async {
     try {
       if (_currentUserId != null) {
@@ -96,7 +128,6 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
         }
       }
     } catch (e) {
-      debugPrint("Error fetching profile: $e");
       if (mounted) setState(() => _isLoadingProfile = false);
     }
   }
@@ -110,12 +141,10 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
     Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high);
     _currentPosition = position;
-
     String address =
         await _getAddressFromLatLng(position.latitude, position.longitude);
 
     setState(() {
-      _locationStatus = "Location Detected";
       _pickupController.text = address;
       _moveToPosition(LatLng(position.latitude, position.longitude), "Pickup",
           isPickup: true);
@@ -144,7 +173,8 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
           position: target,
           infoWindow: InfoWindow(title: title),
           icon: BitmapDescriptor.defaultMarkerWithHue(
-              isPickup ? BitmapDescriptor.hueAzure : BitmapDescriptor.hueRed),
+            isPickup ? BitmapDescriptor.hueGreen : BitmapDescriptor.hueRed,
+          ),
         ),
       );
     });
@@ -184,9 +214,9 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
       setState(() {
         _polylines[const PolylineId("ride_route")] = Polyline(
           polylineId: const PolylineId("ride_route"),
-          color: Colors.blueAccent,
+          color: AppTheme.deepForest,
           points: _polylineCoordinates,
-          width: 6,
+          width: 5,
           jointType: JointType.round,
         );
       });
@@ -198,7 +228,6 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
     if (_mapController == null ||
         _currentPosition == null ||
         _dropLatLng == null) return;
-
     LatLng p1 = LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
     LatLng p2 = _dropLatLng!;
     LatLngBounds bounds;
@@ -219,37 +248,57 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
     _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
   }
 
+  // 🟢 NEW: Dynamically handles both Pickup and Drop taps based on the active state
   void _onMapTap(LatLng tappedPoint) async {
-    setState(() => _dropLatLng = tappedPoint);
     String address = await _getAddressFromLatLng(
         tappedPoint.latitude, tappedPoint.longitude);
-    setState(() => _dropController.text = address);
-    _moveToPosition(tappedPoint, "Drop Location", isPickup: false);
+
+    setState(() {
+      if (_isSettingPickup) {
+        _pickupController.text = address;
+        _currentPosition = Position(
+            latitude: tappedPoint.latitude,
+            longitude: tappedPoint.longitude,
+            timestamp: DateTime.now(),
+            accuracy: 0,
+            altitude: 0,
+            heading: 0,
+            speed: 0,
+            speedAccuracy: 0,
+            altitudeAccuracy: 0,
+            headingAccuracy: 0);
+        _moveToPosition(tappedPoint, "Pickup Location", isPickup: true);
+      } else {
+        _dropLatLng = tappedPoint;
+        _dropController.text = address;
+        _moveToPosition(tappedPoint, "Drop Location", isPickup: false);
+      }
+    });
   }
 
-  Future<void> _handleAutocomplete(
+  Future<void> _openCustomSearch(
       TextEditingController controller, bool isPickup) async {
-    var p = await PlacesAutocomplete.show(
+    // Sync the active tap state with whichever modal was just opened
+    setState(() => _isSettingPickup = isPickup);
+
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
-      apiKey: kGoogleApiKey,
-      mode: Mode.overlay,
-      language: "en",
-      components: [Component(Component.country, "in")],
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) =>
+          LocationSearchModal(isPickup: isPickup, apiKey: kGoogleApiKey),
     );
 
-    if (p != null) {
-      final places = gm_webservice.GoogleMapsPlaces(apiKey: kGoogleApiKey);
-      final detail = await places.getDetailsByPlaceId(p.placeId!);
-      final lat = detail.result.geometry!.location.lat;
-      final lng = detail.result.geometry!.location.lng;
-      LatLng target = LatLng(lat, lng);
+    if (result != null) {
+      LatLng target = result['latlng'];
+      String address = result['address'];
 
       setState(() {
-        controller.text = p.description!;
+        controller.text = address;
         if (isPickup) {
           _currentPosition = Position(
-              latitude: lat,
-              longitude: lng,
+              latitude: target.latitude,
+              longitude: target.longitude,
               timestamp: DateTime.now(),
               accuracy: 0,
               altitude: 0,
@@ -262,7 +311,7 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
           _dropLatLng = target;
         }
       });
-      _moveToPosition(target, p.description!, isPickup: isPickup);
+      _moveToPosition(target, address, isPickup: isPickup);
     }
   }
 
@@ -273,7 +322,7 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
 
   Future<void> _searchSharedTrips() async {
     if (_dropController.text.isEmpty) {
-      _showSnackBar("Please provide drop location", Colors.red);
+      _showSnackBar("Please provide a drop location", Colors.orangeAccent);
       return;
     }
 
@@ -290,25 +339,18 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
 
       for (var doc in snapshot.docs) {
         var data = doc.data() as Map<String, dynamic>;
-
-        double driverLat = data['current_lat'];
-        double driverLng = data['current_lng'];
-
         double distanceToDriver = Geolocator.distanceBetween(
             _currentPosition!.latitude,
             _currentPosition!.longitude,
-            driverLat,
-            driverLng);
+            data['current_lat'],
+            data['current_lng']);
 
         if (distanceToDriver <= 5000) {
           double perKmRate = data['per_seat_fare_per_km'] ?? 12.0;
-          double calculatedFare =
+          data['calculated_fare'] =
               _calculatedDistanceKm * perKmRate * _requestedSeats;
-
-          data['calculated_fare'] = calculatedFare;
           data['trip_id'] = doc.id;
           data['distance_away'] = (distanceToDriver / 1000).toStringAsFixed(1);
-
           validTrips.add(data);
         }
       }
@@ -319,31 +361,24 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
       });
 
       if (validTrips.isEmpty) {
-        _showSnackBar("No shared rides available nearby", Colors.orange);
+        _showSnackBar("No shared rides available nearby", AppTheme.dustySage);
       } else {
         _showAvailableRidesSheet();
       }
     } catch (e) {
       setState(() => _isSearching = false);
-      _showSnackBar("Error finding rides: $e", Colors.red);
+      _showSnackBar("Error finding rides: $e", Colors.redAccent);
     }
   }
 
   Future<void> _bookSelectedTrip(Map<String, dynamic> tripData) async {
     final String tripId = tripData['trip_id'];
-
-    if (_currentUserId == null) {
-      _showSnackBar("Please log in first", Colors.red);
-      return;
-    }
+    if (_currentUserId == null) return;
 
     try {
       DocumentReference tripRef =
           FirebaseFirestore.instance.collection('shared_trips').doc(tripId);
-      DocumentReference passengerRef =
-          tripRef.collection('passengers').doc(_currentUserId);
-
-      await passengerRef.set({
+      await tripRef.collection('passengers').doc(_currentUserId).set({
         'passenger_id': _currentUserId,
         'pickup_lat': _currentPosition!.latitude,
         'pickup_lng': _currentPosition!.longitude,
@@ -357,83 +392,100 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
       });
 
       _showSnackBar(
-          "Request sent! Waiting for driver approval...", Colors.green);
+          "Request sent! Waiting for driver approval...", AppTheme.mutedPine);
 
       if (mounted) {
-        Map<String, dynamic> ridePayload = {
-          'trip_id': tripId,
-          'passenger_id': _currentUserId,
-          'driver_name': tripData['driver_name'],
-          'vehicle_number': tripData['vehicle_number'] ?? "Carpool Vehicle",
-          'pickup_lat': _currentPosition!.latitude,
-          'pickup_lng': _currentPosition!.longitude,
-          'drop_lat': _dropLatLng!.latitude,
-          'drop_lng': _dropLatLng!.longitude,
-          'fare': tripData['calculated_fare'],
-          'seats_booked': _requestedSeats,
-          'current_lat': tripData['current_lat'],
-          'current_lng': tripData['current_lng'],
-          'current_heading': tripData['current_heading'],
-        };
-
         Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => LiveRideTrackingScreen(rideData: ridePayload),
-          ),
-        );
+            context,
+            MaterialPageRoute(
+                builder: (context) => LiveRideTrackingScreen(rideData: {
+                      'trip_id': tripId,
+                      'passenger_id': _currentUserId,
+                      'driver_name': tripData['driver_name'],
+                      'vehicle_number':
+                          tripData['vehicle_number'] ?? "Carpool Vehicle",
+                      'pickup_lat': _currentPosition!.latitude,
+                      'pickup_lng': _currentPosition!.longitude,
+                      'drop_lat': _dropLatLng!.latitude,
+                      'drop_lng': _dropLatLng!.longitude,
+                      'fare': tripData['calculated_fare'],
+                      'seats_booked': _requestedSeats,
+                      'current_lat': tripData['current_lat'],
+                      'current_lng': tripData['current_lng'],
+                    })));
       }
     } catch (e) {
-      _showSnackBar("Booking failed: $e", Colors.red);
+      _showSnackBar("Booking failed: $e", Colors.redAccent);
     }
   }
 
   void _showAvailableRidesSheet() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) {
         return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.deepForest : AppTheme.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Column(
             children: [
-              const Padding(
-                padding: EdgeInsets.all(16.0),
+              Padding(
+                padding: const EdgeInsets.all(20.0),
                 child: Text("Available Rides",
-                    style:
-                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    style: GoogleFonts.poppins(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? AppTheme.white : AppTheme.deepForest)),
               ),
               Expanded(
                 child: ListView.builder(
                   itemCount: _availableSharedTrips.length,
                   itemBuilder: (context, index) {
                     var trip = _availableSharedTrips[index];
-                    return ListTile(
-                      leading:
-                          const CircleAvatar(child: Icon(Icons.directions_car)),
-                      title: Text(
-                          "${trip['driver_name']} • ${trip['distance_away']} km away"),
-                      subtitle: Text("Seats left: ${trip['available_seats']}"),
-                      trailing: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text("₹${trip['calculated_fare'].toStringAsFixed(0)}",
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18,
-                                  color: Colors.green)),
-                          ElevatedButton(
-                            onPressed: () {
-                              Navigator.pop(context);
-                              _bookSelectedTrip(trip);
-                            },
-                            child: const Text("Book"),
-                          )
-                        ],
+                    return Container(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? const Color(0xFF2A5240)
+                            : AppTheme.softMint.withOpacity(0.4),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor:
+                              isDark ? AppTheme.deepForest : AppTheme.white,
+                          child: const Icon(Icons.directions_car,
+                              color: AppTheme.mutedPine),
+                        ),
+                        title: Text("${trip['driver_name']}",
+                            style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.bold)),
+                        subtitle: Text(
+                            "${trip['distance_away']} km away • Seats left: ${trip['available_seats']}"),
+                        trailing: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                                "₹${trip['calculated_fare'].toStringAsFixed(0)}",
+                                style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    color: AppTheme.mutedPine)),
+                            ElevatedButton(
+                              onPressed: () {
+                                Navigator.pop(context);
+                                _bookSelectedTrip(trip);
+                              },
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppTheme.mutedPine),
+                              child: const Text("Book"),
+                            )
+                          ],
+                        ),
                       ),
                     );
                   },
@@ -449,214 +501,534 @@ class _RideBookingScreenState extends State<RideBookingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: true,
       body: Stack(
         children: [
           GoogleMap(
             initialCameraPosition:
                 CameraPosition(target: _defaultCenter, zoom: 13.0),
-            onMapCreated: (controller) => _mapController = controller,
+            onMapCreated: (controller) {
+              _mapController = controller;
+              _updateMapStyle();
+            },
             markers: _markers,
             polylines: Set<Polyline>.of(_polylines.values),
             onTap: _onMapTap,
             myLocationEnabled: true,
             myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
           ),
-          _buildTopOverlay(),
-
-          // 🟢 Reactive StreamBuilder Bottom Overlay
+          _buildFloatingControls(),
           _buildBottomOverlay(),
-
           if (_isSearching)
-            const Center(
-                child: CircularProgressIndicator(color: Colors.orangeAccent)),
+            Container(
+              color: Colors.black.withOpacity(0.3),
+              child: const Center(
+                  child: CircularProgressIndicator(color: AppTheme.mutedPine)),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildTopOverlay() {
+  Widget _buildFloatingControls() {
     return Positioned(
       top: 50,
       left: 20,
       right: 20,
-      child: Column(
-        children: [
-          _buildSearchBox(
-              "Pickup",
-              _pickupController,
-              () => _handleAutocomplete(_pickupController, true),
-              Icons.circle,
-              Colors.blueAccent),
-          const SizedBox(height: 10),
-          _buildSearchBox(
-              "Where to?",
-              _dropController,
-              () => _handleAutocomplete(_dropController, false),
-              Icons.location_on,
-              Colors.redAccent),
-        ],
+      child: SlideTransition(
+        position: _slideTop,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _buildGlassButton(
+                Icons.arrow_back_ios_new_rounded, () => Navigator.pop(context)),
+            ValueListenableBuilder<ThemeMode>(
+              valueListenable: themeNotifier,
+              builder: (context, currentMode, child) {
+                final isDark = currentMode == ThemeMode.dark;
+                return _buildGlassButton(
+                    isDark ? Icons.light_mode : Icons.dark_mode,
+                    () => themeNotifier.value =
+                        isDark ? ThemeMode.light : ThemeMode.dark);
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  // 🟢 REWRITTEN: StreamBuilder dynamically checks balance
+  Widget _buildGlassButton(IconData icon, VoidCallback onTap) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(30),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: isDark
+                ? AppTheme.deepForest.withOpacity(0.7)
+                : AppTheme.white.withOpacity(0.8),
+            shape: BoxShape.circle,
+            border: Border.all(
+                color: isDark
+                    ? AppTheme.dustySage.withOpacity(0.3)
+                    : AppTheme.softMint,
+                width: 1),
+          ),
+          child: IconButton(
+            icon: Icon(icon,
+                color: isDark ? AppTheme.softMint : AppTheme.deepForest),
+            onPressed: onTap,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildBottomOverlay() {
     if (_currentUserId == null) return const SizedBox.shrink();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Positioned(
       bottom: 0,
       left: 0,
       right: 0,
-      child: Container(
-        margin: const EdgeInsets.all(16),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.95),
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: const [
-              BoxShadow(color: Colors.black12, blurRadius: 20)
-            ]),
-        child: _isLoadingProfile
-            ? const SizedBox(
-                height: 100, child: Center(child: CircularProgressIndicator()))
-            : StreamBuilder<double>(
-                stream: _userService.streamNegativeBalance(_currentUserId!),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const SizedBox(
-                        height: 100,
-                        child: Center(child: CircularProgressIndicator()));
-                  }
-
-                  final double currentNegativeBalance = snapshot.data ?? 0.0;
-
-                  // 🟢 Switch UI instantly based on streamed value
-                  return currentNegativeBalance > 0
-                      ? _buildPenaltyUI(currentNegativeBalance)
-                      : _buildNormalBookingUI();
-                },
-              ),
+      child: SlideTransition(
+        position: _slideBottom,
+        child: Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: isDark
+                ? AppTheme.deepForest.withOpacity(0.95)
+                : AppTheme.white.withOpacity(0.95),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+                color: isDark
+                    ? AppTheme.mutedPine.withOpacity(0.3)
+                    : Colors.transparent,
+                width: 1),
+            boxShadow: [
+              BoxShadow(
+                  color: isDark
+                      ? Colors.black45
+                      : AppTheme.dustySage.withOpacity(0.2),
+                  blurRadius: 24,
+                  offset: const Offset(0, 10))
+            ],
+          ),
+          child: _isLoadingProfile
+              ? const SizedBox(
+                  height: 100,
+                  child: Center(
+                      child:
+                          CircularProgressIndicator(color: AppTheme.mutedPine)))
+              : StreamBuilder<double>(
+                  stream: _userService.streamNegativeBalance(_currentUserId!),
+                  builder: (context, snapshot) {
+                    final double currentNegativeBalance = snapshot.data ?? 0.0;
+                    return currentNegativeBalance > 0
+                        ? _buildPenaltyUI(currentNegativeBalance, isDark)
+                        : _buildNormalBookingUI(isDark);
+                  },
+                ),
+        ),
       ),
     );
   }
 
-  // 🟢 REWRITTEN: Takes balance as argument, triggers Payment Service
-  Widget _buildPenaltyUI(double balance) {
+  Widget _buildPenaltyUI(double balance, bool isDark) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 40),
-        const SizedBox(height: 10),
-        const Text("Booking Blocked",
-            style: TextStyle(
-                fontSize: 18, fontWeight: FontWeight.bold, color: Colors.red)),
-        const SizedBox(height: 5),
-        Text(
-            "You have an unpaid penalty of ₹${balance.toStringAsFixed(0)} for making a driver wait.",
-            textAlign: TextAlign.center),
-        const SizedBox(height: 15),
+        const Icon(Icons.error_outline_rounded,
+            color: Colors.redAccent, size: 48),
+        const SizedBox(height: 12),
+        Text("Account Restricted",
+            style: GoogleFonts.poppins(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.redAccent)),
+        const SizedBox(height: 8),
+        Text("You have an unpaid penalty of ₹${balance.toStringAsFixed(0)}.",
+            style: GoogleFonts.poppins(
+                color: isDark ? AppTheme.white : AppTheme.deepForest)),
+        const SizedBox(height: 24),
         SizedBox(
           width: double.infinity,
-          height: 50,
+          height: 55,
           child: ElevatedButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.black,
+                backgroundColor: Colors.redAccent,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12))),
-            onPressed: () async {
-              try {
-                // Show a quick loading dialog so the user knows the app registered the tap
-                showDialog(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (context) => const Center(
-                      child: CircularProgressIndicator(color: Colors.green)),
-                );
-
-                await _paymentService.initiateClearBalance();
-
-                // Close the loading dialog once Razorpay responds or handles the open request
-                if (context.mounted) Navigator.pop(context);
-              } catch (e) {
-                if (context.mounted) {
-                  Navigator.pop(context); // Close loading dialog
-                  _showSnackBar(
-                      "Could not initialize payment wrapper: $e", Colors.red);
-                }
-              }
-            },
-            child: Text("Pay ₹${balance.toStringAsFixed(0)} to Unlock",
-                style: const TextStyle(color: Colors.white, fontSize: 16)),
+                    borderRadius: BorderRadius.circular(16))),
+            onPressed: () => _paymentService.initiateClearBalance(),
+            child: Text("PAY ₹${balance.toStringAsFixed(0)} TO UNLOCK",
+                style: GoogleFonts.poppins(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         )
       ],
     );
   }
 
-  Widget _buildNormalBookingUI() {
+  // 🟢 NEW: Reusable row builder for selecting locations with active state
+  Widget _buildLocationRow(bool isPickup, String title, String value,
+      IconData icon, Color iconColor, bool isDark) {
+    bool isActive = _isSettingPickup == isPickup;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      decoration: BoxDecoration(
+        color: isActive
+            ? (isDark
+                ? AppTheme.white.withOpacity(0.1)
+                : AppTheme.white.withOpacity(0.6))
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isActive
+              ? (isDark
+                  ? AppTheme.softMint.withOpacity(0.3)
+                  : AppTheme.mutedPine.withOpacity(0.3))
+              : Colors.transparent,
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                setState(() => _isSettingPickup = isPickup);
+                _openCustomSearch(
+                    isPickup ? _pickupController : _dropController, isPickup);
+              },
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                child: Row(
+                  children: [
+                    Icon(icon, color: iconColor, size: 18),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        value.isEmpty ? title : value,
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: isActive || value.isNotEmpty
+                              ? FontWeight.bold
+                              : FontWeight.w500,
+                          color: value.isEmpty
+                              ? AppTheme.dustySage
+                              : (isDark ? AppTheme.white : AppTheme.deepForest),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.touch_app_rounded,
+              color: isActive
+                  ? AppTheme.mutedPine
+                  : AppTheme.dustySage.withOpacity(0.5),
+              size: 20,
+            ),
+            tooltip: "Select on Map",
+            onPressed: () {
+              setState(() => _isSettingPickup = isPickup);
+              _showSnackBar(
+                  "Tap on the map to set ${isPickup ? 'Pickup' : 'Drop-off'} location",
+                  AppTheme.mutedPine);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNormalBookingUI(bool isDark) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: isDark
+                ? const Color(0xFF2A5240)
+                : AppTheme.softMint.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+                color: isDark
+                    ? AppTheme.dustySage.withOpacity(0.2)
+                    : Colors.transparent),
+          ),
+          child: Column(
+            children: [
+              // 🟢 Uses the new active-state rows!
+              _buildLocationRow(
+                  true,
+                  "Current Location",
+                  _pickupController.text,
+                  Icons.trip_origin,
+                  AppTheme.mutedPine,
+                  isDark),
+
+              Padding(
+                padding: const EdgeInsets.only(left: 19.0),
+                child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Container(
+                        height: 16,
+                        width: 2,
+                        color: AppTheme.dustySage.withOpacity(0.5))),
+              ),
+
+              _buildLocationRow(false, "Where to?", _dropController.text,
+                  Icons.location_on, Colors.blueAccent, isDark),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text("Seats Required:",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.remove_circle_outline),
-                  onPressed: () => setState(() {
-                    if (_requestedSeats > 1) _requestedSeats--;
-                  }),
-                ),
-                Text("$_requestedSeats",
-                    style: const TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.bold)),
-                IconButton(
-                  icon: const Icon(Icons.add_circle_outline),
-                  onPressed: () => setState(() {
-                    if (_requestedSeats < 6) _requestedSeats++;
-                  }),
-                ),
-              ],
+            Text("Seats Required",
+                style: GoogleFonts.poppins(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? AppTheme.white : AppTheme.deepForest)),
+            Container(
+              decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF2A5240)
+                      : AppTheme.softMint.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(30)),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.remove,
+                        color: isDark ? AppTheme.white : AppTheme.deepForest,
+                        size: 20),
+                    onPressed: () => setState(() {
+                      if (_requestedSeats > 1) _requestedSeats--;
+                    }),
+                  ),
+                  Text("$_requestedSeats",
+                      style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color:
+                              isDark ? AppTheme.white : AppTheme.deepForest)),
+                  IconButton(
+                    icon: Icon(Icons.add,
+                        color: isDark ? AppTheme.white : AppTheme.deepForest,
+                        size: 20),
+                    onPressed: () => setState(() {
+                      if (_requestedSeats < 6) _requestedSeats++;
+                    }),
+                  ),
+                ],
+              ),
             )
           ],
         ),
-        const SizedBox(height: 15),
+        const SizedBox(height: 24),
         SizedBox(
           width: double.infinity,
-          height: 50,
+          height: 55,
           child: ElevatedButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.black,
+                backgroundColor: AppTheme.mutedPine,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12))),
+                    borderRadius: BorderRadius.circular(16))),
             onPressed: _searchSharedTrips,
-            child: const Text("Find Shared Rides",
-                style: TextStyle(color: Colors.white, fontSize: 16)),
+            child: Text("FIND SHARED RIDES",
+                style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2)),
           ),
         )
       ],
     );
   }
+}
 
-  Widget _buildSearchBox(String hint, TextEditingController controller,
-      VoidCallback onTap, IconData prefixIcon, Color iconColor) {
+// 🟢 BULLETPROOF, STATE-PRESERVING SEARCH MODAL WIDGET
+class LocationSearchModal extends StatefulWidget {
+  final bool isPickup;
+  final String apiKey;
+
+  const LocationSearchModal(
+      {super.key, required this.isPickup, required this.apiKey});
+
+  @override
+  State<LocationSearchModal> createState() => _LocationSearchModalState();
+}
+
+class _LocationSearchModalState extends State<LocationSearchModal> {
+  List<dynamic> _predictions = [];
+  bool _isFetching = false;
+  Timer? _debounce;
+
+  void _searchPlaces(String query) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+
+    if (query.isEmpty) {
+      setState(() {
+        _predictions.clear();
+        _isFetching = false;
+      });
+      return;
+    }
+
+    setState(() => _isFetching = true);
+
+    _debounce = Timer(const Duration(milliseconds: 400), () async {
+      try {
+        final url = Uri.parse(
+            'https://maps.googleapis.com/maps/api/place/autocomplete/json?input=$query&key=${widget.apiKey}&components=country:in');
+        final response = await http.get(url);
+        final data = json.decode(response.body);
+
+        if (data['status'] == 'OK' && mounted) {
+          setState(() {
+            _predictions = data['predictions'];
+            _isFetching = false;
+          });
+        } else {
+          if (mounted) setState(() => _isFetching = false);
+        }
+      } catch (e) {
+        if (mounted) setState(() => _isFetching = false);
+      }
+    });
+  }
+
+  Future<void> _fetchPlaceDetails(String placeId, String description) async {
+    setState(() => _isFetching = true);
+    try {
+      final url = Uri.parse(
+          'https://maps.googleapis.com/maps/api/place/details/json?place_id=$placeId&key=${widget.apiKey}');
+      final response = await http.get(url);
+      final data = json.decode(response.body);
+
+      if (data['status'] == 'OK') {
+        final lat = data['result']['geometry']['location']['lat'];
+        final lng = data['result']['geometry']['location']['lng'];
+        if (mounted) {
+          Navigator.pop(context, {
+            'latlng': LatLng(lat, lng),
+            'address': description,
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isFetching = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
+      height: MediaQuery.of(context).size.height * 0.88,
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10)]),
-      child: TextField(
-        controller: controller,
-        readOnly: true,
-        onTap: onTap,
-        decoration: InputDecoration(
-            hintText: hint,
-            prefixIcon: Icon(prefixIcon, color: iconColor, size: 18),
-            border: InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(vertical: 15)),
+        color: isDark ? AppTheme.deepForest : AppTheme.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 12),
+          Container(
+              width: 40,
+              height: 5,
+              decoration: BoxDecoration(
+                  color: isDark ? AppTheme.dustySage : Colors.grey[300],
+                  borderRadius: BorderRadius.circular(10))),
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(widget.isPickup ? "Set Pickup Location" : "Where to?",
+                style: GoogleFonts.poppins(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? AppTheme.white : AppTheme.deepForest)),
+          ),
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: TextField(
+              autofocus: true,
+              onChanged: _searchPlaces,
+              style: GoogleFonts.poppins(
+                  color: isDark ? AppTheme.white : AppTheme.deepForest,
+                  fontSize: 16),
+              decoration: InputDecoration(
+                hintText: "Search area, street, or landmark...",
+                hintStyle: GoogleFonts.poppins(
+                    color: isDark ? AppTheme.dustySage : Colors.grey[400]),
+                prefixIcon: const Icon(Icons.search, color: AppTheme.mutedPine),
+                filled: true,
+                fillColor: isDark
+                    ? const Color(0xFF2A5240)
+                    : AppTheme.softMint.withOpacity(0.3),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none),
+              ),
+            ),
+          ),
+          if (_isFetching)
+            const LinearProgressIndicator(
+                color: AppTheme.mutedPine, backgroundColor: Colors.transparent),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              itemCount: _predictions.length,
+              itemBuilder: (context, index) {
+                final prediction = _predictions[index];
+                return ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        color: isDark
+                            ? AppTheme.deepForest
+                            : AppTheme.softMint.withOpacity(0.5),
+                        shape: BoxShape.circle),
+                    child: const Icon(Icons.location_on,
+                        color: AppTheme.mutedPine, size: 20),
+                  ),
+                  title: Text(
+                      prediction['structured_formatting']['main_text'] ?? "",
+                      style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w600,
+                          color:
+                              isDark ? AppTheme.white : AppTheme.deepForest)),
+                  subtitle: Text(
+                      prediction['structured_formatting']['secondary_text'] ??
+                          "",
+                      style: GoogleFonts.poppins(
+                          color: AppTheme.dustySage, fontSize: 12)),
+                  onTap: () => _fetchPlaceDetails(
+                      prediction['place_id'], prediction['description']),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

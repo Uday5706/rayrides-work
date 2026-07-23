@@ -1,16 +1,18 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:flutter_google_places_hoc081098/flutter_google_places_hoc081098.dart';
-import 'package:flutter_google_places_hoc081098/google_maps_webservice_places.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:google_maps_webservice/places.dart' as gm_webservice;
+import 'package:http/http.dart' as http;
 import 'package:persistent_bottom_nav_bar/persistent_bottom_nav_bar.dart';
 
 import '../services/payment_service.dart';
+import 'core/app_theme.dart'; // 🟢 Premium Theme
 import 'driver_map_tracking_screen.dart';
 
 class fareOfferScreen extends StatefulWidget {
@@ -20,7 +22,8 @@ class fareOfferScreen extends StatefulWidget {
   State<fareOfferScreen> createState() => _fareOfferScreenState();
 }
 
-class _fareOfferScreenState extends State<fareOfferScreen> {
+class _fareOfferScreenState extends State<fareOfferScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _dropController = TextEditingController();
   final TextEditingController _farePerKmController =
       TextEditingController(text: "12.0");
@@ -33,28 +36,44 @@ class _fareOfferScreenState extends State<fareOfferScreen> {
   final PaymentService _paymentService = PaymentService();
   final String kGoogleApiKey = dotenv.env['GOOGLE_MAPS_API_KEY'] ?? "";
 
-  // Theming
-  final Color primaryGreen = const Color(0xFF2E7D32);
-  final Color lightGreen = const Color(0xFFE8F5E9);
+  // 🟢 Animations
+  late AnimationController _animController;
+  late Animation<Offset> _slideUp;
+  late Animation<double> _scaleIn;
 
   @override
   void initState() {
     super.initState();
+
+    // Animation Setup
+    _animController = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1000));
+    _slideUp =
+        Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
+    );
+    _scaleIn = Tween<double>(begin: 0.9, end: 1.0).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.elasticOut),
+    );
+    _animController.forward();
+
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       _paymentService.initialize(user.uid, onSuccess: () {
         if (mounted) {
-          Navigator.pop(context); // Close any active sheet/dialog if open
+          Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text("Success! Captain Pass Activated."),
-              backgroundColor: Colors.green));
+            content: Text("Success! Captain Pass Activated."),
+            backgroundColor: AppTheme.mutedPine,
+          ));
         }
       }, onError: (message) {
         if (mounted) {
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text("Payment Failed: $message"),
-              backgroundColor: Colors.red));
+            content: Text("Payment Failed: $message"),
+            backgroundColor: Colors.redAccent,
+          ));
         }
       });
     }
@@ -63,27 +82,25 @@ class _fareOfferScreenState extends State<fareOfferScreen> {
   @override
   void dispose() {
     _paymentService.dispose();
+    _animController.dispose();
+    _dropController.dispose();
+    _farePerKmController.dispose();
     super.dispose();
   }
 
-  Future<void> _handleAutocomplete() async {
-    var p = await PlacesAutocomplete.show(
+  // 🟢 LAUNCH PREMIUM SEARCH MODAL
+  Future<void> _handleCustomSearch() async {
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
-      apiKey: kGoogleApiKey,
-      mode: Mode.overlay,
-      language: "en",
-      components: [Component(Component.country, "in")],
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => FareLocationSearchModal(apiKey: kGoogleApiKey),
     );
 
-    if (p != null) {
-      final places = gm_webservice.GoogleMapsPlaces(apiKey: kGoogleApiKey);
-      final detail = await places.getDetailsByPlaceId(p.placeId!);
-      final lat = detail.result.geometry!.location.lat;
-      final lng = detail.result.geometry!.location.lng;
-
+    if (result != null) {
       setState(() {
-        _dropController.text = p.description!;
-        _dropLatLng = LatLng(lat, lng);
+        _dropController.text = result['address'];
+        _dropLatLng = result['latlng'];
       });
     }
   }
@@ -91,7 +108,9 @@ class _fareOfferScreenState extends State<fareOfferScreen> {
   Future<void> _publishSharedRoute() async {
     if (_dropLatLng == null || _dropController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("Please select a destination drop-off location.")));
+        content: Text("Please select a drop-off destination."),
+        backgroundColor: Colors.orangeAccent,
+      ));
       return;
     }
     setState(() => _isPublishing = true);
@@ -101,14 +120,13 @@ class _fareOfferScreenState extends State<fareOfferScreen> {
       final String driverUid = user?.uid ?? "demo_driver_uid";
 
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) throw Exception('Location services are disabled.');
+      if (!serviceEnabled) throw Exception('Location services disabled.');
 
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          throw Exception('Location permissions are denied');
-        }
+        if (permission == LocationPermission.denied)
+          throw Exception('Permissions denied');
       }
 
       Position position = await Geolocator.getCurrentPosition(
@@ -119,7 +137,7 @@ class _fareOfferScreenState extends State<fareOfferScreen> {
           await FirebaseFirestore.instance.collection('shared_trips').add({
         'driver_id': driverUid,
         'driver_name': user?.displayName ?? "Captain",
-        'vehicle_number': "DL 1CA 1234",
+        'vehicle_number': "DL 1CA 1234", // Ideally fetched from driver profile
         'status': 'active',
         'start_name': 'Current Location',
         'start_latitude': position.latitude,
@@ -152,21 +170,19 @@ class _fareOfferScreenState extends State<fareOfferScreen> {
       );
     } catch (e) {
       setState(() => _isPublishing = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Error publishing route: $e")));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Error: $e"), backgroundColor: Colors.redAccent));
     }
   }
 
-  // 🟢 STEP 1: PRE-FETCH BREAKDOWN FOR THE MODAL UX
   Future<void> _showTransactionSummaryModal() async {
     setState(() => _isLoadingCheckoutData = true);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // Fetch Plan price and Driver Wallet concurrently from backend/Firestore
-      // For precision, we fetch live values to show exact math in the modal
       final planDoc = await FirebaseFirestore.instance
           .collection('subscription_plans')
           .doc('plan_monthly')
@@ -208,83 +224,93 @@ class _fareOfferScreenState extends State<fareOfferScreen> {
       if (!mounted) return;
       setState(() => _isLoadingCheckoutData = false);
 
-      // 🟢 POP UP THE FINTECH SUMMARY SHEET
       showModalBottomSheet(
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
         builder: (context) => Container(
           padding: const EdgeInsets.all(24),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.deepForest : AppTheme.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border.all(
+                color: isDark
+                    ? AppTheme.mutedPine.withOpacity(0.3)
+                    : Colors.transparent),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                      color: Colors.grey[300],
-                      borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
+                  child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                          color: isDark ? AppTheme.dustySage : Colors.grey[300],
+                          borderRadius: BorderRadius.circular(10)))),
               const SizedBox(height: 20),
               Text("Transaction Summary",
                   style: GoogleFonts.poppins(
-                      fontSize: 20, fontWeight: FontWeight.bold)),
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? AppTheme.white : AppTheme.deepForest)),
               const SizedBox(height: 5),
               Text("Review your breakdown before activating Captain Pro.",
                   style: GoogleFonts.poppins(
-                      fontSize: 13, color: Colors.grey[600])),
-
+                      fontSize: 13, color: AppTheme.dustySage)),
               const SizedBox(height: 25),
-
-              // Ledger breakdown box
               Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.grey[200]!),
+                  color: isDark
+                      ? const Color(0xFF2A5240)
+                      : AppTheme.softMint.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: isDark
+                          ? AppTheme.dustySage.withOpacity(0.2)
+                          : Colors.transparent),
                 ),
                 child: Column(
                   children: [
                     _buildSummaryRow("30-Day Pass Price",
-                        "₹${basePrice.toStringAsFixed(0)}"),
-                    const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 8),
-                        child: Divider()),
+                        "₹${basePrice.toStringAsFixed(0)}", isDark),
+                    Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Divider(
+                            color: isDark
+                                ? AppTheme.dustySage.withOpacity(0.3)
+                                : Colors.grey[300])),
                     _buildSummaryRow("Wallet Deducted",
-                        "- ₹${walletUsed.toStringAsFixed(0)}",
-                        color: Colors.green),
-                    const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 8),
-                        child: Divider()),
-                    _buildSummaryRow(
-                        "Gateway Payable", "₹${gatewayDue.toStringAsFixed(0)}",
+                        "- ₹${walletUsed.toStringAsFixed(0)}", isDark,
+                        color: AppTheme.mutedPine),
+                    Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Divider(
+                            color: isDark
+                                ? AppTheme.dustySage.withOpacity(0.3)
+                                : Colors.grey[300])),
+                    _buildSummaryRow("Gateway Payable",
+                        "₹${gatewayDue.toStringAsFixed(0)}", isDark,
                         isBold: true),
                   ],
                 ),
               ),
-
               const SizedBox(height: 25),
-
               SizedBox(
                 width: double.infinity,
                 height: 55,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryGreen,
+                    backgroundColor: AppTheme.mutedPine,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16)),
                   ),
                   onPressed: () {
-                    Navigator.pop(context); // Close sheet
-                    _executeSubscriptionCheckout(); // Fire backend + razorpay securely
+                    Navigator.pop(context);
+                    _paymentService
+                        .initiateSubscriptionCheckout('plan_monthly');
                   },
                   child: Text(
                     gatewayDue == 0
@@ -293,7 +319,8 @@ class _fareOfferScreenState extends State<fareOfferScreen> {
                     style: GoogleFonts.poppins(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
-                        fontSize: 15),
+                        fontSize: 15,
+                        letterSpacing: 1),
                   ),
                 ),
               ),
@@ -309,7 +336,7 @@ class _fareOfferScreenState extends State<fareOfferScreen> {
     }
   }
 
-  Widget _buildSummaryRow(String title, String value,
+  Widget _buildSummaryRow(String title, String value, bool isDark,
       {Color? color, bool isBold = false}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -317,32 +344,29 @@ class _fareOfferScreenState extends State<fareOfferScreen> {
         Text(title,
             style: GoogleFonts.poppins(
                 fontSize: 14,
-                color: isBold ? Colors.black : Colors.grey[700],
+                color: isBold
+                    ? (isDark ? AppTheme.white : AppTheme.deepForest)
+                    : AppTheme.dustySage,
                 fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
         Text(value,
             style: GoogleFonts.poppins(
-                fontSize: 15,
-                color: color ?? (isBold ? Colors.black : Colors.black87),
+                fontSize: 16,
+                color: color ?? (isDark ? AppTheme.white : AppTheme.deepForest),
                 fontWeight: FontWeight.bold)),
       ],
     );
-  }
-
-  // 🟢 STEP 2: HANDOFF ENTIRELY TO BACKEND LOGIC VIA PAYMENT SERVICE
-  Future<void> _executeSubscriptionCheckout() async {
-    try {
-      await _paymentService.initiateSubscriptionCheckout('plan_monthly');
-    } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null)
-      return const Scaffold(body: Center(child: Text("Please log in")));
+      return Scaffold(
+          backgroundColor: AppTheme.deepForest,
+          body: const Center(
+              child: CircularProgressIndicator(color: AppTheme.softMint)));
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance
@@ -369,353 +393,604 @@ class _fareOfferScreenState extends State<fareOfferScreen> {
                   userSnapshot.data!.data() as Map<String, dynamic>;
               if (userData['sub_end'] != null) {
                 DateTime subEnd = (userData['sub_end'] as Timestamp).toDate();
-                if (subEnd.isAfter(DateTime.now())) {
-                  hasActiveSub = true;
-                }
+                if (subEnd.isAfter(DateTime.now())) hasActiveSub = true;
               }
             }
 
-            if (hasActiveSub || isGlobalFree) {
-              return _buildPublishRouteUI(isGlobalFree);
-            } else {
-              return _buildSubscriptionPaywallUI();
-            }
+            return Scaffold(
+              backgroundColor:
+                  isDark ? AppTheme.deepForest : const Color(0xFFF5F7F5),
+              appBar: AppBar(
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                title: Text(
+                    hasActiveSub || isGlobalFree
+                        ? "Publish Route"
+                        : "Captain Pro",
+                    style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? AppTheme.white : AppTheme.deepForest)),
+                centerTitle: true,
+                actions: [
+                  ValueListenableBuilder<ThemeMode>(
+                    valueListenable: themeNotifier,
+                    builder: (context, currentMode, child) {
+                      return IconButton(
+                        icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode,
+                            color: isDark
+                                ? AppTheme.softMint
+                                : AppTheme.deepForest),
+                        onPressed: () => themeNotifier.value =
+                            isDark ? ThemeMode.light : ThemeMode.dark,
+                      );
+                    },
+                  ),
+                ],
+              ),
+              body: hasActiveSub || isGlobalFree
+                  ? _buildPublishRouteUI(isGlobalFree, isDark)
+                  : _buildSubscriptionPaywallUI(isDark),
+            );
           },
         );
       },
     );
   }
 
-  Widget _buildPublishRouteUI(bool isGlobalFree) {
-    return ColoredBox(
-      color: primaryGreen,
-      child: SafeArea(
-        bottom: false,
-        child: Scaffold(
-          backgroundColor: Colors.grey[100],
-          appBar: AppBar(
-            title: Text("Publish Route",
-                style: GoogleFonts.poppins(color: Colors.white)),
-            backgroundColor: primaryGreen,
-            elevation: 0,
-          ),
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (isGlobalFree)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 20),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                        color: lightGreen,
-                        borderRadius: BorderRadius.circular(10)),
-                    child: Row(
+  Widget _buildPublishRouteUI(bool isGlobalFree, bool isDark) {
+    return SlideTransition(
+      position: _slideUp,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (isGlobalFree)
+              Container(
+                margin: const EdgeInsets.only(bottom: 24),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                    color: AppTheme.mutedPine.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(16),
+                    border:
+                        Border.all(color: AppTheme.mutedPine.withOpacity(0.3))),
+                child: Row(
+                  children: [
+                    const Icon(Icons.star_rounded, color: AppTheme.mutedPine),
+                    const SizedBox(width: 12),
+                    Expanded(
+                        child: Text(
+                            "Early Adopter Bonus: Subscriptions are currently FREE!",
+                            style: GoogleFonts.poppins(
+                                color: isDark
+                                    ? AppTheme.softMint
+                                    : AppTheme.mutedPine,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13))),
+                  ],
+                ),
+              ),
+            Text("Where are you driving to?",
+                style: GoogleFonts.poppins(
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? AppTheme.white : AppTheme.deepForest,
+                    letterSpacing: -0.5)),
+            const SizedBox(height: 8),
+            Text(
+                "Publish your route and let riders along the way book your empty seats.",
+                style: GoogleFonts.poppins(
+                    color: AppTheme.dustySage, fontSize: 14)),
+            const SizedBox(height: 32),
+
+            ScaleTransition(
+              scale: _scaleIn,
+              child: Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF2A5240) : AppTheme.white,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                      color: isDark
+                          ? AppTheme.dustySage.withOpacity(0.2)
+                          : Colors.transparent),
+                  boxShadow: [
+                    BoxShadow(
+                        color: isDark
+                            ? Colors.black26
+                            : AppTheme.dustySage.withOpacity(0.15),
+                        blurRadius: 15,
+                        offset: const Offset(0, 8))
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Row(
                       children: [
-                        Icon(Icons.star, color: primaryGreen),
-                        const SizedBox(width: 10),
+                        const Icon(Icons.trip_origin,
+                            color: AppTheme.mutedPine, size: 20),
+                        const SizedBox(width: 16),
                         Expanded(
-                          child: Text(
-                              "Early Adopter Bonus: Subscriptions are currently FREE!",
-                              style: GoogleFonts.poppins(
-                                  color: primaryGreen,
-                                  fontWeight: FontWeight.w600)),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text("Starting Point",
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      color: AppTheme.dustySage,
+                                      fontWeight: FontWeight.w500)),
+                              Text("Current Location",
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: isDark
+                                          ? AppTheme.white
+                                          : AppTheme.deepForest)),
+                            ],
+                          ),
                         )
                       ],
                     ),
-                  ),
-                Text("Where are you driving to?",
-                    style: GoogleFonts.poppins(
-                        fontSize: 22, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 10),
-                Text(
-                    "Publish your route and let riders along the way book your empty seats.",
-                    style: GoogleFonts.poppins(color: Colors.grey[700])),
-                const SizedBox(height: 30),
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: const [
-                      BoxShadow(color: Colors.black12, blurRadius: 10)
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      _buildStaticOriginField(),
-                      const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 8.0),
-                          child: Divider()),
-                      _buildDestinationField(),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 30),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildSettingCard(
-                          title: "Available Seats",
-                          icon: Icons.airline_seat_recline_normal,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              IconButton(
-                                icon: Icon(Icons.remove_circle_outline,
-                                    color: primaryGreen),
-                                onPressed: () => setState(() {
-                                  if (_totalCapacity > 1) _totalCapacity--;
-                                }),
-                              ),
-                              Text("$_totalCapacity",
-                                  style: GoogleFonts.poppins(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold)),
-                              IconButton(
-                                icon: Icon(Icons.add_circle_outline,
-                                    color: primaryGreen),
-                                onPressed: () => setState(() {
-                                  if (_totalCapacity < 6) _totalCapacity++;
-                                }),
-                              ),
-                            ],
-                          )),
+                    Padding(
+                      padding:
+                          const EdgeInsets.only(left: 9.0, top: 4, bottom: 4),
+                      child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Container(
+                              height: 24,
+                              width: 2,
+                              color: AppTheme.dustySage.withOpacity(0.3))),
                     ),
-                    const SizedBox(width: 15),
-                    Expanded(
-                      child: _buildSettingCard(
-                          title: "Fare per Km (₹)",
-                          icon: Icons.currency_rupee,
-                          child: TextField(
-                            controller: _farePerKmController,
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true),
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.poppins(
-                                fontSize: 20, fontWeight: FontWeight.bold),
-                            decoration:
-                                const InputDecoration(border: InputBorder.none),
-                          )),
+                    GestureDetector(
+                      onTap: _handleCustomSearch,
+                      child: Container(
+                        color: Colors.transparent,
+                        child: Row(
+                          children: [
+                            const Icon(Icons.location_on,
+                                color: Colors.blueAccent, size: 20),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text("Drop-off Location",
+                                      style: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          color: AppTheme.dustySage,
+                                          fontWeight: FontWeight.w500)),
+                                  Text(
+                                    _dropController.text.isEmpty
+                                        ? "Tap to search destination"
+                                        : _dropController.text,
+                                    style: GoogleFonts.poppins(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: _dropController.text.isEmpty
+                                            ? AppTheme.dustySage
+                                            : (isDark
+                                                ? AppTheme.white
+                                                : AppTheme.deepForest)),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            )
+                          ],
+                        ),
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 40),
-                SizedBox(
-                  width: double.infinity,
-                  height: 55,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryGreen,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16))),
-                    onPressed: _isPublishing ? null : _publishSharedRoute,
-                    child: _isPublishing
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : Text("PUBLISH ROUTE & GO ONLINE",
-                            style: GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 1)),
-                  ),
-                )
-              ],
+              ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSubscriptionPaywallUI() {
-    return ColoredBox(
-      color: Colors.white,
-      child: SafeArea(
-        bottom: false,
-        child: Scaffold(
-          backgroundColor: Colors.white,
-          appBar: AppBar(
-            title: Text("Captain Pro",
-                style: GoogleFonts.poppins(color: Colors.black)),
-            backgroundColor: Colors.white,
-            elevation: 0,
-            iconTheme: const IconThemeData(color: Colors.black),
-          ),
-          body: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.workspace_premium, size: 80, color: primaryGreen),
-                  const SizedBox(height: 20),
-                  Text("Unlock Captain Mode",
-                      style: GoogleFonts.poppins(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black)),
-                  const SizedBox(height: 10),
-                  Text(
-                      "Your subscription has expired. Renew your pass to publish routes and start earning.",
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.poppins(
-                          fontSize: 14, color: Colors.grey[600])),
-                  const SizedBox(height: 40),
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: lightGreen,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: primaryGreen, width: 2),
-                    ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildSettingCard(
+                    title: "Available Seats",
+                    icon: Icons.airline_seat_recline_normal_rounded,
+                    isDark: isDark,
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text("30-Day Pass",
-                                style: GoogleFonts.poppins(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: primaryGreen)),
-                            Text("Zero commission on rides",
-                                style: GoogleFonts.poppins(
-                                    fontSize: 12,
-                                    color: primaryGreen.withOpacity(0.8))),
-                          ],
-                        ),
-                        Text("₹499",
+                        IconButton(
+                            icon: const Icon(Icons.remove_circle_outline,
+                                color: AppTheme.mutedPine),
+                            onPressed: () => setState(() {
+                                  if (_totalCapacity > 1) _totalCapacity--;
+                                })),
+                        Text("$_totalCapacity",
                             style: GoogleFonts.poppins(
-                                fontSize: 24,
+                                fontSize: 22,
                                 fontWeight: FontWeight.bold,
-                                color: primaryGreen)),
+                                color: isDark
+                                    ? AppTheme.white
+                                    : AppTheme.deepForest)),
+                        IconButton(
+                            icon: const Icon(Icons.add_circle_outline,
+                                color: AppTheme.mutedPine),
+                            onPressed: () => setState(() {
+                                  if (_totalCapacity < 6) _totalCapacity++;
+                                })),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.info_outline,
-                          size: 14, color: Colors.grey[500]),
-                      const SizedBox(width: 5),
-                      Text(
-                          "Wallet balance will be automatically applied at checkout.",
-                          style: GoogleFonts.poppins(
-                              fontSize: 12, color: Colors.grey[500])),
-                    ],
-                  ),
-                  const SizedBox(height: 40),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 55,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: primaryGreen,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16))),
-                      // 🟢 TRiggers the clean modal summary sheet instead of direct raw loading
-                      onPressed: _isLoadingCheckoutData
-                          ? null
-                          : _showTransactionSummaryModal,
-                      child: _isLoadingCheckoutData
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : Text("SUBSCRIBE NOW",
-                              style: GoogleFonts.poppins(
-                                  fontSize: 16,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 1)),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildSettingCard(
+                    title: "Fare per Km",
+                    icon: Icons.currency_rupee_rounded,
+                    isDark: isDark,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                      child: TextField(
+                        controller: _farePerKmController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.poppins(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color:
+                                isDark ? AppTheme.white : AppTheme.deepForest),
+                        decoration: const InputDecoration(
+                            border: InputBorder.none, isDense: true),
+                      ),
                     ),
-                  )
-                ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 40),
+            SizedBox(
+              width: double.infinity,
+              height: 55,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.mutedPine,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16))),
+                onPressed: _isPublishing ? null : _publishSharedRoute,
+                child: _isPublishing
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : Text("PUBLISH & GO ONLINE",
+                        style: GoogleFonts.poppins(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.2)),
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStaticOriginField() {
-    return Row(
-      children: [
-        Icon(Icons.my_location, color: primaryGreen),
-        const SizedBox(width: 15),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text("Starting Point",
-                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey)),
-              Text("Current Location",
-                  style: GoogleFonts.poppins(
-                      fontSize: 16, fontWeight: FontWeight.w500)),
-            ],
-          ),
-        )
-      ],
-    );
-  }
-
-  Widget _buildDestinationField() {
-    return GestureDetector(
-      onTap: _handleAutocomplete,
-      child: Container(
-        color: Colors.transparent,
-        child: Row(
-          children: [
-            const Icon(Icons.flag, color: Colors.redAccent),
-            const SizedBox(width: 15),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text("Drop-off Location",
-                      style: GoogleFonts.poppins(
-                          fontSize: 12, color: Colors.grey)),
-                  Text(
-                    _dropController.text.isEmpty
-                        ? "Tap to search destination"
-                        : _dropController.text,
-                    style: GoogleFonts.poppins(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                        color: _dropController.text.isEmpty
-                            ? Colors.grey
-                            : Colors.black),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            )
+            const SizedBox(height: 100), // Nav bar padding
           ],
         ),
       ),
     );
   }
 
+  Widget _buildSubscriptionPaywallUI(bool isDark) {
+    return SlideTransition(
+      position: _slideUp,
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                    color: AppTheme.softMint.withOpacity(0.2),
+                    shape: BoxShape.circle),
+                child: const Icon(Icons.workspace_premium_rounded,
+                    size: 80, color: AppTheme.mutedPine),
+              ),
+              const SizedBox(height: 24),
+              Text("Unlock Captain Mode",
+                  style: GoogleFonts.poppins(
+                      fontSize: 26,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? AppTheme.white : AppTheme.deepForest,
+                      letterSpacing: -0.5)),
+              const SizedBox(height: 12),
+              Text(
+                  "Your pass has expired. Renew to publish routes, accept riders, and keep 100% of your earnings.",
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                      fontSize: 14, color: AppTheme.dustySage, height: 1.5)),
+              const SizedBox(height: 40),
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                      colors: isDark
+                          ? [
+                              AppTheme.mutedPine.withOpacity(0.8),
+                              const Color(0xFF2A5240)
+                            ]
+                          : [AppTheme.mutedPine, const Color(0xFF759C8C)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight),
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                        color: AppTheme.mutedPine.withOpacity(0.3),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10))
+                  ],
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("30-Day Pass",
+                            style: GoogleFonts.poppins(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.white)),
+                        const SizedBox(height: 4),
+                        Text("Zero commission forever.",
+                            style: GoogleFonts.poppins(
+                                fontSize: 12, color: AppTheme.softMint)),
+                      ],
+                    ),
+                    Text("₹499",
+                        style: GoogleFonts.poppins(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.white)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.info_outline_rounded,
+                      size: 16, color: AppTheme.dustySage),
+                  const SizedBox(width: 8),
+                  Text("Wallet balance automatically applies at checkout.",
+                      style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: AppTheme.dustySage,
+                          fontWeight: FontWeight.w500)),
+                ],
+              ),
+              const SizedBox(height: 40),
+              SizedBox(
+                width: double.infinity,
+                height: 55,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.mutedPine,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16))),
+                  onPressed: _isLoadingCheckoutData
+                      ? null
+                      : _showTransactionSummaryModal,
+                  child: _isLoadingCheckoutData
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : Text("RENEW PASS NOW",
+                          style: GoogleFonts.poppins(
+                              fontSize: 16,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1)),
+                ),
+              )
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSettingCard(
-      {required String title, required IconData icon, required Widget child}) {
+      {required String title,
+      required IconData icon,
+      required Widget child,
+      required bool isDark}) {
     return Container(
-      padding: const EdgeInsets.all(15),
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10)],
+        color: isDark ? const Color(0xFF2A5240) : AppTheme.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+            color: isDark
+                ? AppTheme.dustySage.withOpacity(0.2)
+                : Colors.transparent),
+        boxShadow: [
+          BoxShadow(
+              color: isDark
+                  ? Colors.black26
+                  : AppTheme.dustySage.withOpacity(0.15),
+              blurRadius: 15,
+              offset: const Offset(0, 8))
+        ],
       ),
       child: Column(
         children: [
-          Icon(icon, color: Colors.grey),
-          const SizedBox(height: 5),
+          Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                  color: AppTheme.softMint.withOpacity(0.3),
+                  shape: BoxShape.circle),
+              child: Icon(icon, color: AppTheme.mutedPine, size: 20)),
+          const SizedBox(height: 12),
           Text(title,
-              style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey)),
-          const SizedBox(height: 10),
+              style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  color: AppTheme.dustySage,
+                  fontWeight: FontWeight.w500)),
+          const SizedBox(height: 8),
           child,
+        ],
+      ),
+    );
+  }
+}
+
+// 🟢 REUSABLE PREMIUM SEARCH MODAL FOR DROP LOCATION
+class FareLocationSearchModal extends StatefulWidget {
+  final String apiKey;
+  const FareLocationSearchModal({super.key, required this.apiKey});
+
+  @override
+  State<FareLocationSearchModal> createState() =>
+      _FareLocationSearchModalState();
+}
+
+class _FareLocationSearchModalState extends State<FareLocationSearchModal> {
+  List<dynamic> _predictions = [];
+  bool _isFetching = false;
+  Timer? _debounce;
+
+  void _searchPlaces(String query) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    if (query.isEmpty) {
+      setState(() {
+        _predictions.clear();
+        _isFetching = false;
+      });
+      return;
+    }
+    setState(() => _isFetching = true);
+
+    _debounce = Timer(const Duration(milliseconds: 400), () async {
+      try {
+        final url = Uri.parse(
+            'https://maps.googleapis.com/maps/api/place/autocomplete/json?input=$query&key=${widget.apiKey}&components=country:in');
+        final response = await http.get(url);
+        final data = json.decode(response.body);
+
+        if (data['status'] == 'OK' && mounted) {
+          setState(() {
+            _predictions = data['predictions'];
+            _isFetching = false;
+          });
+        } else {
+          if (mounted) setState(() => _isFetching = false);
+        }
+      } catch (e) {
+        if (mounted) setState(() => _isFetching = false);
+      }
+    });
+  }
+
+  Future<void> _fetchPlaceDetails(String placeId, String description) async {
+    setState(() => _isFetching = true);
+    try {
+      final url = Uri.parse(
+          'https://maps.googleapis.com/maps/api/place/details/json?place_id=$placeId&key=${widget.apiKey}');
+      final response = await http.get(url);
+      final data = json.decode(response.body);
+
+      if (data['status'] == 'OK' && mounted) {
+        final lat = data['result']['geometry']['location']['lat'];
+        final lng = data['result']['geometry']['location']['lng'];
+        Navigator.pop(
+            context, {'latlng': LatLng(lat, lng), 'address': description});
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isFetching = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.88,
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      decoration: BoxDecoration(
+          color: isDark ? AppTheme.deepForest : AppTheme.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(30))),
+      child: Column(
+        children: [
+          const SizedBox(height: 12),
+          Container(
+              width: 40,
+              height: 5,
+              decoration: BoxDecoration(
+                  color: isDark ? AppTheme.dustySage : Colors.grey[300],
+                  borderRadius: BorderRadius.circular(10))),
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text("Set Drop-off Location",
+                style: GoogleFonts.poppins(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? AppTheme.white : AppTheme.deepForest)),
+          ),
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: TextField(
+              autofocus: true,
+              onChanged: _searchPlaces,
+              style: GoogleFonts.poppins(
+                  color: isDark ? AppTheme.white : AppTheme.deepForest,
+                  fontSize: 16),
+              decoration: InputDecoration(
+                hintText: "Search area, street, or landmark...",
+                hintStyle: GoogleFonts.poppins(
+                    color: isDark ? AppTheme.dustySage : Colors.grey[400]),
+                prefixIcon: const Icon(Icons.search, color: AppTheme.mutedPine),
+                filled: true,
+                fillColor: isDark
+                    ? const Color(0xFF2A5240)
+                    : AppTheme.softMint.withOpacity(0.3),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none),
+              ),
+            ),
+          ),
+          if (_isFetching)
+            const LinearProgressIndicator(
+                color: AppTheme.mutedPine, backgroundColor: Colors.transparent),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              itemCount: _predictions.length,
+              itemBuilder: (context, index) {
+                final prediction = _predictions[index];
+                return ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        color: isDark
+                            ? AppTheme.deepForest
+                            : AppTheme.softMint.withOpacity(0.5),
+                        shape: BoxShape.circle),
+                    child: const Icon(Icons.location_on,
+                        color: AppTheme.mutedPine, size: 20),
+                  ),
+                  title: Text(
+                      prediction['structured_formatting']['main_text'] ?? "",
+                      style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w600,
+                          color:
+                              isDark ? AppTheme.white : AppTheme.deepForest)),
+                  subtitle: Text(
+                      prediction['structured_formatting']['secondary_text'] ??
+                          "",
+                      style: GoogleFonts.poppins(
+                          color: AppTheme.dustySage, fontSize: 12)),
+                  onTap: () => _fetchPlaceDetails(
+                      prediction['place_id'], prediction['description']),
+                );
+              },
+            ),
+          ),
         ],
       ),
     );

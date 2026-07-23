@@ -3,18 +3,22 @@ import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // 🟢 Required for Profile Checks
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:rayride/services/rider_socket_service.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
 
+// 🟢 Premium Theme Import
+import 'core/app_theme.dart';
+
 class LiveRideTrackingScreen extends StatefulWidget {
-  final Map<String, dynamic> rideData; // Contains trip_id and passenger_id
+  final Map<String, dynamic> rideData;
 
   const LiveRideTrackingScreen({
     super.key,
@@ -27,6 +31,7 @@ class LiveRideTrackingScreen extends StatefulWidget {
 
 class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
     with SingleTickerProviderStateMixin {
+  GoogleMapController? _mapController;
   final Completer<GoogleMapController> _mapCompleter = Completer();
 
   Set<Polyline> _trackPolylines = {};
@@ -43,14 +48,12 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
   String _tripTime = "Calculating...";
   Timer? _etaDebounce;
 
-  // 🟢 DEFAULT STATE
   String _passengerStatus = "pending_approval";
   bool _hasDriverArrived = false;
   double _carbonSaved = 0.0;
   bool _isNearDrop = false;
   late LatLng _driverStartPos;
 
-  // 🟢 NEW: Capture arrival time to calculate cancellation penalty
   DateTime? _driverArrivalTime;
 
   late String _tripId;
@@ -118,12 +121,11 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
 
       final newStatus = doc['status'];
 
-      // 🟢 NEW: Capture arrival time if driver cancelled on us
       if (newStatus == 'cancelled_by_driver') {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content:
               Text("Driver cancelled the ride (No-Show). Penalties may apply."),
-          backgroundColor: Colors.red,
+          backgroundColor: Colors.redAccent,
           duration: Duration(seconds: 4),
         ));
         Navigator.pop(context);
@@ -136,7 +138,7 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
         if (newStatus == 'rejected') {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text("Driver rejected the request or car is full."),
-            backgroundColor: Colors.red,
+            backgroundColor: Colors.redAccent,
             duration: Duration(seconds: 4),
           ));
           Navigator.pop(context);
@@ -164,18 +166,29 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
       }
     });
 
+    themeNotifier.addListener(_updateMapStyle);
     _initAssets();
   }
 
   @override
   void dispose() {
+    themeNotifier.removeListener(_updateMapStyle);
     _passengerSub?.cancel();
     _tripSub?.cancel();
     _etaDebounce?.cancel();
-
     _animController.dispose();
     _socketService.disconnect();
     super.dispose();
+  }
+
+  void _updateMapStyle() {
+    if (_mapController == null) return;
+    if (themeNotifier.value == ThemeMode.dark) {
+      _mapController!.setMapStyle(
+          '[{"elementType":"geometry","stylers":[{"color":"#212121"}]},{"elementType":"labels.icon","stylers":[{"visibility":"off"}]},{"elementType":"labels.text.fill","stylers":[{"color":"#757575"}]},{"elementType":"labels.text.stroke","stylers":[{"color":"#212121"}]},{"featureType":"administrative","elementType":"geometry","stylers":[{"color":"#757575"}]},{"featureType":"administrative.country","elementType":"labels.text.fill","stylers":[{"color":"#9e9e9e"}]},{"featureType":"administrative.land_parcel","stylers":[{"visibility":"off"}]},{"featureType":"administrative.locality","elementType":"labels.text.fill","stylers":[{"color":"#bdbdbd"}]},{"featureType":"poi","elementType":"labels.text.fill","stylers":[{"color":"#757575"}]},{"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#181818"}]},{"featureType":"poi.park","elementType":"labels.text.fill","stylers":[{"color":"#616161"}]},{"featureType":"poi.park","elementType":"labels.text.stroke","stylers":[{"color":"#1b1b1b"}]},{"featureType":"road","elementType":"geometry.fill","stylers":[{"color":"#2c2c2c"}]},{"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"#8a8a8a"}]},{"featureType":"road.arterial","elementType":"geometry","stylers":[{"color":"#373737"}]},{"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#3c3c3c"}]},{"featureType":"road.highway.controlled_access","elementType":"geometry","stylers":[{"color":"#4e4e4e"}]},{"featureType":"road.local","elementType":"labels.text.fill","stylers":[{"color":"#616161"}]},{"featureType":"transit","elementType":"labels.text.fill","stylers":[{"color":"#757575"}]},{"featureType":"water","elementType":"geometry","stylers":[{"color":"#000000"}]},{"featureType":"water","elementType":"labels.text.fill","stylers":[{"color":"#3d3d3d"}]}]');
+    } else {
+      _mapController!.setMapStyle(null);
+    }
   }
 
   Future<void> _handleDriverMovement(LatLng newPos, double heading) async {
@@ -197,12 +210,12 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
   void _handleDropOff() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-          content: Text("You have been dropped off! Trip complete.")),
+          content: Text("You have been dropped off! Trip complete."),
+          backgroundColor: AppTheme.mutedPine),
     );
     Navigator.pop(context);
   }
 
-  // 🟢 UPDATED: Penalty logic for Rider Cancellation
   Future<void> _cancelRideWithDelay() async {
     if (_isCancelling) return;
     setState(() => _isCancelling = true);
@@ -214,7 +227,6 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
       double penaltyAmount = 0.0;
       double ratingPenalty = 0.0;
 
-      // 1. Calculate penalties if the driver had already arrived
       if (_hasDriverArrived && _driverArrivalTime != null) {
         int waitBlockMinutes = 1;
         int feePerBlock = 1;
@@ -223,7 +235,6 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
 
         int totalWaitMinutes =
             DateTime.now().difference(_driverArrivalTime!).inMinutes;
-
         int feeBlocks = (totalWaitMinutes / waitBlockMinutes).floor();
         penaltyAmount = (feeBlocks * feePerBlock).toDouble();
 
@@ -239,7 +250,6 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
         DocumentReference riderRef =
             FirebaseFirestore.instance.collection('users').doc(user.uid);
 
-        // Fetch Driver's UID from the trip to pay them the penalty
         DocumentSnapshot tripDoc = await transaction.get(tripRef);
         DocumentSnapshot passDoc = await transaction.get(passRef);
         DocumentSnapshot riderDoc = await transaction.get(riderRef);
@@ -250,7 +260,6 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
           String currentStatus = passDoc['status'];
           String driverId = tripDoc['driver_id'];
 
-          // Restore seats to carpool (only if they were actually taken)
           if (currentStatus != 'pending_approval') {
             transaction.update(
                 tripRef, {'available_seats': currentSeats + seatsBooked});
@@ -259,12 +268,10 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
           transaction.update(passRef,
               {'status': 'cancelled', 'penalty_applied': penaltyAmount});
 
-          // Apply Penalities to Rider
           if (penaltyAmount > 0 || ratingPenalty > 0) {
             double currentRating =
                 (riderDoc.data() as Map<String, dynamic>)['rating'] ?? 5.0;
-            double newRating = currentRating - ratingPenalty;
-            if (newRating < 1.0) newRating = 1.0;
+            double newRating = (currentRating - ratingPenalty).clamp(1.0, 5.0);
 
             Map<String, dynamic> riderUpdates = {};
             if (penaltyAmount > 0)
@@ -274,7 +281,6 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
 
             transaction.update(riderRef, riderUpdates);
 
-            // ✅ NEW WAY: Create Debt Ledger (Escrow)
             if (penaltyAmount > 0 && driverId.isNotEmpty) {
               DocumentReference ledgerRef = FirebaseFirestore.instance
                   .collection('penalty_ledgers')
@@ -299,12 +305,12 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
         if (penaltyAmount > 0) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               content: Text(
-                  "Ride Cancelled. A ₹${penaltyAmount.toStringAsFixed(0)} penalty was applied for making the driver wait."),
-              backgroundColor: Colors.red));
+                  "Ride Cancelled. A ₹${penaltyAmount.toStringAsFixed(0)} penalty was applied."),
+              backgroundColor: Colors.redAccent));
         } else {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
               content: Text("Ride Cancelled successfully."),
-              backgroundColor: Colors.green));
+              backgroundColor: AppTheme.mutedPine));
         }
         Navigator.pop(context);
       }
@@ -362,7 +368,7 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
         if (distanceToPickup < 50 && !_hasDriverArrived) {
           setState(() {
             _hasDriverArrived = true;
-            _driverArrivalTime = DateTime.now(); // 🟢 CAPTURE ARRIVAL TIME
+            _driverArrivalTime = DateTime.now();
           });
           _throttledPathUpdate(currentPos);
         }
@@ -414,7 +420,7 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
         }
       }
     } catch (e) {
-      print("ETA Error: $e");
+      debugPrint("ETA Error: $e");
     }
     return 0;
   }
@@ -426,11 +432,10 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
     _newHeading = destHeading;
 
     if ((_newHeading - _oldHeading).abs() > 180) {
-      if (_newHeading > _oldHeading) {
+      if (_newHeading > _oldHeading)
         _oldHeading += 360;
-      } else {
+      else
         _newHeading += 360;
-      }
     }
     _animController.forward(from: 0.0);
   }
@@ -483,14 +488,14 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
           _trackPolylines.add(Polyline(
             polylineId: const PolylineId("trip_live"),
             points: points,
-            color: Colors.blueAccent,
+            color: AppTheme.mutedPine,
             width: 6,
           ));
         } else {
           _trackPolylines.add(Polyline(
             polylineId: const PolylineId("approach_live"),
             points: points,
-            color: Colors.grey.withOpacity(0.7),
+            color: AppTheme.dustySage.withOpacity(0.7),
             width: 5,
           ));
         }
@@ -509,11 +514,11 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
     const double iconSize = 110.0;
     TextPainter painter = TextPainter(textDirection: TextDirection.ltr);
     painter.text = TextSpan(
-      text: String.fromCharCode(Icons.directions_car_filled.codePoint),
+      text: String.fromCharCode(Icons.directions_car_filled_rounded.codePoint),
       style: TextStyle(
           fontSize: iconSize,
-          fontFamily: Icons.directions_car_filled.fontFamily,
-          color: Colors.blueAccent),
+          fontFamily: Icons.directions_car_filled_rounded.fontFamily,
+          color: AppTheme.mutedPine),
     );
     painter.layout();
     painter.paint(canvas, const Offset(0, 0));
@@ -546,7 +551,7 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
         _trackPolylines.add(Polyline(
             polylineId: const PolylineId("trip_main"),
             points: tripPoints,
-            color: Colors.blueAccent,
+            color: AppTheme.mutedPine,
             width: 6));
       });
     }
@@ -565,7 +570,8 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
           markerId: const MarkerId("pickup_marker"),
           position: LatLng(
               widget.rideData['pickup_lat'], widget.rideData['pickup_lng']),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)),
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen)),
       Marker(
           markerId: const MarkerId("drop_marker"),
           position:
@@ -577,8 +583,10 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: isDark ? AppTheme.deepForest : Colors.black,
       body: Stack(
         children: [
           GoogleMap(
@@ -588,165 +596,211 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
             polylines: _trackPolylines,
             onMapCreated: (ctrl) {
               if (!_mapCompleter.isCompleted) _mapCompleter.complete(ctrl);
+              _mapController = ctrl;
+              _updateMapStyle();
             },
             myLocationEnabled: false,
             zoomControlsEnabled: false,
             rotateGesturesEnabled: false,
           ),
+
+          // 🟢 Glassmorphic Carbon Saved Pill
           Positioned(
             top: 60,
             left: 20,
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                  color: Colors.green[800],
-                  borderRadius: BorderRadius.circular(12)),
-              child: Text(
-                  "🌱 Carbon Saved: ${_carbonSaved.toStringAsFixed(2)} kg",
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12)),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppTheme.deepForest.withOpacity(0.7)
+                        : AppTheme.white.withOpacity(0.8),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                        color: isDark
+                            ? AppTheme.dustySage.withOpacity(0.3)
+                            : AppTheme.softMint),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.eco_rounded,
+                          color: AppTheme.mutedPine, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        "Carbon Saved: ${_carbonSaved.toStringAsFixed(2)} kg",
+                        style: GoogleFonts.poppins(
+                            color:
+                                isDark ? AppTheme.white : AppTheme.deepForest,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
+
           SlidingUpPanel(
             minHeight: 280,
             maxHeight: 500,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            color: Colors.black87,
-            panel: _buildInformationPanel(),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+            color: isDark ? AppTheme.deepForest : AppTheme.white,
+            panel: _buildInformationPanel(isDark),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildInformationPanel() {
+  Widget _buildInformationPanel(bool isDark) {
     final bool showCancelButton = _passengerStatus == "awaiting_pickup" ||
         _passengerStatus == "pending_approval";
 
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      child: Container(
-        color: Colors.white,
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.deepForest : AppTheme.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 5,
+                decoration: BoxDecoration(
+                    color: isDark ? AppTheme.dustySage : Colors.grey[300],
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+            const SizedBox(height: 20),
+            _buildHeaderSection(isDark),
+            const SizedBox(height: 20),
+
+            // Driver Profile Row
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 26,
+                  backgroundColor: AppTheme.softMint.withOpacity(0.5),
+                  child: const Icon(Icons.person_rounded,
+                      color: AppTheme.mutedPine),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.rideData['driver_name'] ?? "Shared Captain",
+                        style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color:
+                                isDark ? AppTheme.white : AppTheme.deepForest),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.rideData['vehicle_number'] ?? "Carpool Vehicle",
+                        style: GoogleFonts.poppins(
+                            color: AppTheme.dustySage, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                      color: Colors.grey[400],
-                      borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(height: 20),
-              _buildHeaderSection(),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  const CircleAvatar(
-                    radius: 26,
-                    backgroundColor: Colors.blueGrey,
-                    child: Icon(Icons.person, color: Colors.white),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.rideData['driver_name'] ?? "Shared Captain",
-                          style: const TextStyle(
-                              fontSize: 16,
+                      color: isDark
+                          ? const Color(0xFF2A5240)
+                          : AppTheme.softMint.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(20)),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.star_rounded,
+                          color: Colors.amber, size: 16),
+                      const SizedBox(width: 4),
+                      Text("4.7",
+                          style: GoogleFonts.poppins(
                               fontWeight: FontWeight.bold,
-                              color: Colors.black),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          widget.rideData['vehicle_number'] ??
-                              "Carpool Vehicle",
-                          style: const TextStyle(color: Colors.grey),
-                        ),
-                      ],
-                    ),
+                              color: isDark
+                                  ? AppTheme.white
+                                  : AppTheme.deepForest))
+                    ],
                   ),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                        color: Colors.grey[200],
-                        borderRadius: BorderRadius.circular(20)),
-                    child: Row(
-                      children: const [
-                        Icon(Icons.star, color: Colors.orange, size: 16),
-                        SizedBox(width: 4),
-                        Text("4.7")
-                      ],
-                    ),
-                  )
-                ],
-              ),
-              const SizedBox(height: 25),
-              _buildOtpCard(),
-              const SizedBox(height: 25),
-              _locationRow(Icons.circle, Colors.green,
-                  widget.rideData['pickup_name'] ?? "Pickup location"),
-              const SizedBox(height: 10),
-              _locationRow(Icons.location_on, Colors.red,
-                  widget.rideData['drop_name'] ?? "Drop location"),
-              const SizedBox(height: 25),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                      "Total Fare (${widget.rideData['seats_booked'] ?? 1} seats)",
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16)),
-                  Text(
-                      "₹${(double.tryParse(widget.rideData['fare'].toString()) ?? 0.0).toStringAsFixed(0)}",
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                          color: Colors.black))
-                ],
-              ),
-              const SizedBox(height: 30),
-              if (showCancelButton)
-                SizedBox(
-                  width: double.infinity,
-                  height: 55,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.grey[200],
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                    ),
-                    onPressed: _isCancelling ? null : _cancelRideWithDelay,
-                    child: _isCancelling
-                        ? const SizedBox(
-                            height: 22,
-                            width: 22,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.red))
-                        : const Text("Cancel Ride",
-                            style: TextStyle(
-                                color: Colors.red,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16)),
+                )
+              ],
+            ),
+            const SizedBox(height: 24),
+            _buildOtpCard(isDark),
+            const SizedBox(height: 24),
+
+            _locationRow(Icons.trip_origin, AppTheme.mutedPine,
+                widget.rideData['pickup_name'] ?? "Pickup location", isDark),
+            const SizedBox(height: 12),
+            _locationRow(Icons.location_on_rounded, Colors.blueAccent,
+                widget.rideData['drop_name'] ?? "Drop location", isDark),
+            const SizedBox(height: 24),
+
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                    "Total Fare (${widget.rideData['seats_booked'] ?? 1} seats)",
+                    style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                        color: isDark ? AppTheme.white : AppTheme.deepForest)),
+                Text(
+                    "₹${(double.tryParse(widget.rideData['fare'].toString()) ?? 0.0).toStringAsFixed(0)}",
+                    style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: AppTheme.mutedPine))
+              ],
+            ),
+            const SizedBox(height: 24),
+
+            if (showCancelButton)
+              SizedBox(
+                width: double.infinity,
+                height: 55,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.redAccent.withOpacity(0.1),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
                   ),
+                  onPressed: _isCancelling ? null : _cancelRideWithDelay,
+                  child: _isCancelling
+                      ? const SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.redAccent))
+                      : Text("Cancel Ride",
+                          style: GoogleFonts.poppins(
+                              color: Colors.redAccent,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
                 ),
-            ],
-          ),
+              ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildOtpCard() {
+  Widget _buildOtpCard(bool isDark) {
     if (_passengerStatus != "awaiting_pickup") return const SizedBox();
 
     final otp = widget.rideData['otp']?.toString() ?? "1234";
@@ -755,25 +809,28 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
       crossAxisAlignment: CrossAxisAlignment.center,
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        const Text("Share PIN with driver",
-            style: TextStyle(
+        Text("Share PIN with driver",
+            style: GoogleFonts.poppins(
                 fontSize: 13,
-                color: Colors.black54,
+                color: AppTheme.dustySage,
                 fontWeight: FontWeight.w500)),
-        const SizedBox(height: 12),
         Row(
           children: otp.split('').map((digit) {
             return Container(
-              margin: const EdgeInsets.only(right: 10),
-              width: 30,
-              height: 30,
+              margin: const EdgeInsets.only(left: 8),
+              width: 36,
+              height: 36,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  borderRadius: BorderRadius.circular(8)),
+                  color: isDark
+                      ? const Color(0xFF2A5240)
+                      : AppTheme.softMint.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(10)),
               child: Text(digit,
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.bold)),
+                  style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? AppTheme.white : AppTheme.deepForest)),
             );
           }).toList(),
         ),
@@ -781,7 +838,7 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
     );
   }
 
-  Widget _buildHeaderSection() {
+  Widget _buildHeaderSection(bool isDark) {
     String title;
     String subtitle;
 
@@ -795,19 +852,23 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(title,
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.bold)),
+                  style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? AppTheme.white : AppTheme.deepForest)),
               const SizedBox(height: 4),
               Text(subtitle,
-                  style: const TextStyle(fontSize: 13, color: Colors.orange)),
+                  style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: Colors.orangeAccent,
+                      fontWeight: FontWeight.w500)),
             ],
           ),
           const SizedBox(
-            height: 24,
-            width: 24,
-            child:
-                CircularProgressIndicator(color: Colors.orange, strokeWidth: 3),
-          )
+              height: 24,
+              width: 24,
+              child: CircularProgressIndicator(
+                  color: Colors.orangeAccent, strokeWidth: 3))
         ],
       );
     } else if (_passengerStatus == "awaiting_pickup") {
@@ -833,11 +894,14 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title,
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? AppTheme.white : AppTheme.deepForest)),
             const SizedBox(height: 4),
             Text(subtitle,
-                style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                style: GoogleFonts.poppins(
+                    fontSize: 13, color: AppTheme.dustySage)),
           ],
         ),
         _buildHeaderRightWidget(),
@@ -850,9 +914,12 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-            color: Colors.green, borderRadius: BorderRadius.circular(20)),
-        child: const Text("Arrived",
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            color: AppTheme.mutedPine, borderRadius: BorderRadius.circular(20)),
+        child: Text("Arrived",
+            style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 12)),
       );
     }
 
@@ -867,24 +934,27 @@ class _LiveRideTrackingScreenState extends State<LiveRideTrackingScreen>
       duration: const Duration(milliseconds: 300),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-          color: Colors.blue[800], borderRadius: BorderRadius.circular(20)),
+          color: AppTheme.mutedPine, borderRadius: BorderRadius.circular(20)),
       child: Text(value,
-          style: const TextStyle(
-              color: Colors.white, fontWeight: FontWeight.bold)),
+          style: GoogleFonts.poppins(
+              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
     );
   }
-}
 
-Widget _locationRow(IconData icon, Color color, String text) {
-  return Row(
-    children: [
-      Icon(icon, color: color, size: 16),
-      const SizedBox(width: 10),
-      Expanded(
-        child: Text(text,
-            style: const TextStyle(color: Colors.black87),
-            overflow: TextOverflow.ellipsis),
-      )
-    ],
-  );
+  Widget _locationRow(IconData icon, Color color, String text, bool isDark) {
+    return Row(
+      children: [
+        Icon(icon, color: color, size: 18),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(text,
+              style: GoogleFonts.poppins(
+                  color: isDark ? AppTheme.white : AppTheme.deepForest,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500),
+              overflow: TextOverflow.ellipsis),
+        )
+      ],
+    );
+  }
 }
